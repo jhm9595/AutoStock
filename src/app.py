@@ -333,6 +333,25 @@ def toggle_condition(toggle: ConditionToggle):
     save_state()
     return {"status": "success", "active_conditions": state["active_conditions"], "action": action}
 
+@app.post("/api/conditions/refresh")
+def refresh_conditions():
+    if state["simulation_mode"]:
+        raise HTTPException(status_code=400, detail="시뮬레이션 모드에서는 실제 조건식을 조회할 수 없습니다.")
+    if not state["general_info"]["is_connected"]:
+        raise HTTPException(status_code=400, detail="키움 API가 연결되어 있지 않습니다.")
+    try:
+        conds = kiwoom_client.get_condition_list()
+        if conds:
+            state["condition_search_list"] = conds
+            save_state()
+            logger.info(f"Manually refreshed condition list: {conds}")
+            return {"status": "success", "conditions": conds}
+        else:
+            return {"status": "success", "message": "등록된 조건식이 없습니다."}
+    except Exception as e:
+        logger.error(f"Failed to refresh condition list: {e}")
+        raise HTTPException(status_code=500, detail=f"조건식 동기화 실패: {str(e)}")
+
 @app.post("/api/simulation/toggle")
 def toggle_simulation_mode(toggle: ModeToggle):
     state["simulation_mode"] = toggle.simulation_mode

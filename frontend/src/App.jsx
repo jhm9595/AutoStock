@@ -119,6 +119,22 @@ function App() {
     }
   };
 
+  // Refresh Registered Conditions from Kiwoom
+  const handleRefreshConditions = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/conditions/refresh`, { method: 'POST' });
+      const data = await response.json();
+      if (response.ok && data.status === 'success') {
+        alert('실제 키움 조건검색 식 목록이 정상적으로 동기화되었습니다.');
+        fetchState();
+      } else {
+        alert(`동기화 실패: ${data.detail || '오류 발생'}`);
+      }
+    } catch (err) {
+      alert(`에러: ${err.message}`);
+    }
+  };
+
   // Reset Simulation
   const handleResetSimulation = async () => {
     if (!window.confirm("시뮬레이션 데이터(잔고 및 매매이력)를 초기화하시겠습니까?")) return;
@@ -262,11 +278,21 @@ function App() {
 
           {/* 3) 조건검색 연결/해제 영역 (Compact & Sleek) */}
           <div className="card" style={{ padding: '14px' }}>
-            <div className="card-title">
-              <span>조건 탐지 실시간 연동</span>
-              <span className="badge badge-connected text-[10px] font-mono" style={{ backgroundColor: '#f1f5f9', color: '#475569' }}>
-                {active_conditions.length}개 연동중
-              </span>
+            <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '12px' }}>
+              <div className="flex items-center gap-1.5">
+                <span>조건 탐지 실시간 연동</span>
+                <span className="badge badge-connected text-[10px] font-mono" style={{ backgroundColor: '#f1f5f9', color: '#475569' }}>
+                  {active_conditions.length}개 연동
+                </span>
+              </div>
+              <button 
+                onClick={handleRefreshConditions}
+                className="btn btn-secondary text-[10px] py-1 px-2 flex items-center gap-1 rounded-lg hover:bg-neutral-100"
+                style={{ border: '1px solid #e2e8f0', cursor: 'pointer', height: '24px', whiteSpace: 'nowrap' }}
+              >
+                <RefreshCw size={10} />
+                조건식 동기화
+              </button>
             </div>
             
             <div className="flex flex-col gap-2.5">
