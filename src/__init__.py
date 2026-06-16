@@ -1,0 +1,1 @@
+# AutoStock core package

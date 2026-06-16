@@ -1,0 +1,23 @@
+# Credentials
+config/*appkey.txt
+config/*secretkey.txt
+config/credentials.json
+
+# Python environment
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and Project Settings
+.vscode/
+.idea/
+*.suo
+*.sln
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
