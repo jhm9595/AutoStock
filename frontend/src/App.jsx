@@ -213,32 +213,6 @@ function App() {
         </div>
         
         <div className="flex gap-2.5 mt-3 sm:mt-0 items-center">
-          {/* Mode Switcher */}
-          <div className="flex bg-neutral-200/70 border border-neutral-300/40 rounded-xl p-0.5">
-            <button 
-              onClick={() => handleToggleMode(true)}
-              className={`text-[11px] px-3 py-1.5 rounded-lg transition-all ${simulation_mode ? 'bg-white text-black font-bold shadow-sm' : 'text-neutral-500 hover:text-black'}`}
-            >
-              모의 시뮬레이션
-            </button>
-            <button 
-              onClick={() => handleToggleMode(false)}
-              className={`text-[11px] px-3 py-1.5 rounded-lg transition-all ${!simulation_mode ? 'bg-white text-black font-bold shadow-sm' : 'text-neutral-500 hover:text-black'}`}
-            >
-              실거래 모드
-            </button>
-          </div>
-
-          {simulation_mode && (
-            <button 
-              onClick={handleResetSimulation} 
-              className="btn btn-secondary text-[11px] py-1.5 px-3 flex items-center gap-1 rounded-xl text-red-600 hover:bg-red-50 border-red-100"
-            >
-              <Trash2 size={12} />
-              시뮬레이터 초기화
-            </button>
-          )}
-
           {/* Connection status */}
           <div className="flex items-center gap-1.5 border border-neutral-200 px-3 py-1.5 rounded-xl bg-white shadow-sm">
             <div className={`w-2.5 h-2.5 rounded-full ${general_info.is_connected ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ backgroundColor: general_info.is_connected ? '#10b981' : '#f43f5e' }}></div>
@@ -259,7 +233,7 @@ function App() {
           <div className="card" style={{ padding: '14px' }}>
             <div className="card-title">
               <span>계좌 상태 요약</span>
-              <span className="badge badge-connected text-[10px]">{simulation_mode ? '모의' : '실제'}</span>
+              <span className="badge badge-connected text-[10px]" style={{ backgroundColor: '#e0f2fe', color: '#0369a1' }}>실운영</span>
             </div>
             
             <div className="flex flex-col gap-2.5 text-xs">

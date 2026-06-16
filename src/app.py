@@ -10,8 +10,11 @@ from pydantic import BaseModel
 from src import config
 from src.auth import TokenManager
 from src.api import KiwoomClient, parse_numeric
+from src.websocket import KiwoomWebSocket
 
 logger = logging.getLogger("AutoStock.App")
+
+kiwoom_ws = None
 
 app = FastAPI(title="AutoStock Trading System Backend")
 
@@ -111,6 +114,93 @@ state["general_info"]["day_of_week"] = days_kr[datetime.now().weekday()]
 token_mgr = TokenManager()
 kiwoom_client = KiwoomClient(token_mgr)
 
+def ws_message_handler(data):
+    try:
+        trnm = data.get("trnm", "")
+        if trnm == "REAL":
+            for entry in data.get("data", []):
+                if entry.get("name") == "조건검색" or entry.get("type") == "02":
+                    vals = entry.get("values", {})
+                    seq = str(vals.get("841", ""))
+                    stk_cd = str(vals.get("9001", ""))
+                    action_type = vals.get("843", "")  # 'I' (Insert) or 'D' (Delete)
+                    time_str = vals.get("20", datetime.now().strftime("%H:%M:%S"))
+                    
+                    if len(time_str) == 6:
+                        time_str = f"{time_str[0:2]}:{time_str[2:4]}:{time_str[4:6]}"
+                        
+                    cond_name = f"조건식 {seq}"
+                    for c in state["condition_search_list"]:
+                        if str(c["id"]) == seq:
+                            cond_name = c["name"]
+                            break
+                            
+                    status_str = "탐지" if action_type == "I" else "해제"
+                    
+                    stk_nm = SIMULATED_STOCKS.get(stk_cd, {}).get("name", "")
+                    if not stk_nm:
+                        stk_nm = f"종목 {stk_cd}"
+                        
+                    duplicate = any(d for d in state["detected_history"][:5] 
+                                    if d["stk_cd"] == stk_cd and d["condition_name"] == cond_name and d["status"] == status_str)
+                    
+                    if not duplicate:
+                        state["detected_history"].insert(0, {
+                            "time": time_str,
+                            "stk_cd": stk_cd,
+                            "stk_nm": stk_nm,
+                            "condition_name": cond_name,
+                            "status": status_str
+                        })
+                        state["detected_history"] = state["detected_history"][:100]
+                        logger.info(f"[실시간 조건] {status_str}: {cond_name} -> {stk_nm}({stk_cd}) @ {time_str}")
+                        
+                        if action_type == "I" and state["settings"]["auto_buy"] and not state["simulation_mode"]:
+                            asyncio.create_task(execute_auto_buy(stk_cd, cond_name))
+                            
+                        save_state()
+                        
+    except Exception as e:
+        logger.error(f"Error handling WS message: {e}")
+
+async def execute_auto_buy(stk_cd, cond_name):
+    try:
+        logger.info(f"[자동 매수] 조건 탐지 자동 매수 개시: {stk_cd} ({cond_name})")
+        holding_exist = any(h for h in state["holdings"] if h["stk_cd"] == stk_cd)
+        if holding_exist:
+            logger.info(f"[자동 매수] {stk_cd} 종목은 이미 보유 중이므로 자동 매수를 건너뜁니다.")
+            return
+
+        loop = asyncio.get_running_loop()
+        stk_info = await loop.run_in_executor(None, kiwoom_client.get_stock_info, stk_cd)
+        price = abs(parse_numeric(stk_info.get("cur_prc", 0)))
+        
+        if price == 0:
+            logger.error(f"[자동 매수] {stk_cd} 현재가를 가져오지 못했습니다. 자동 매수 취소.")
+            return
+
+        budget = state["settings"]["buy_budget_per_stock"]
+        if state["general_info"]["available_funds"] < budget:
+            logger.warning(f"[자동 매수] 예수금 부족 (필요: {budget:,}원 / 잔액: {state['general_info']['available_funds']:,}원)")
+            return
+
+        qty = budget // price
+        if qty <= 0:
+            logger.warning(f"[자동 매수] 매수금액 한도가 1주 가격보다 적어 매수할 수 없습니다.")
+            return
+
+        logger.info(f"[자동 매수] 주문 전송: {stk_cd} {qty}주 @ 시장가")
+        res = await loop.run_in_executor(None, kiwoom_client.place_order, stk_cd, qty, 0, "3", "buy")
+        
+        if res.get("return_code") == 0:
+            logger.info(f"[자동 매수] 주문 성공! 주문번호: {res.get('ord_no')} | {res.get('return_msg')}")
+            await loop.run_in_executor(None, update_kiwoom_connection)
+        else:
+            logger.error(f"[자동 매수] 주문 실패: {res.get('return_msg')}")
+            
+    except Exception as e:
+        logger.error(f"[자동 매수] 자동 매수 처리 중 예외 발생: {e}")
+
 def update_kiwoom_connection():
     if not state["simulation_mode"]:
         try:
@@ -161,6 +251,15 @@ def update_kiwoom_connection():
                     state["holdings"] = holdings
                 except Exception as e:
                     logger.warning(f"Failed to fetch live balance: {e}")
+
+                # Fetch actual condition search list
+                try:
+                    conds = kiwoom_client.get_condition_list()
+                    if conds:
+                        state["condition_search_list"] = conds
+                        logger.info(f"Loaded actual condition list: {conds}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch live condition list: {e}")
             else:
                 state["general_info"]["is_connected"] = False
         except Exception as e:
@@ -216,9 +315,21 @@ def toggle_condition(toggle: ConditionToggle):
     if c_id in state["active_conditions"]:
         state["active_conditions"].remove(c_id)
         action = "disconnected"
+        if not state["simulation_mode"]:
+            try:
+                kiwoom_client.cancel_condition_realtime(c_id)
+                logger.info(f"Kiwoom real-time condition unregistered: {c_id}")
+            except Exception as e:
+                logger.error(f"Failed to unregister condition {c_id} on Kiwoom: {e}")
     else:
         state["active_conditions"].append(c_id)
         action = "connected"
+        if not state["simulation_mode"]:
+            try:
+                kiwoom_client.request_condition_realtime(c_id)
+                logger.info(f"Kiwoom real-time condition registered: {c_id}")
+            except Exception as e:
+                logger.error(f"Failed to register condition {c_id} on Kiwoom: {e}")
     save_state()
     return {"status": "success", "active_conditions": state["active_conditions"], "action": action}
 
@@ -511,7 +622,132 @@ async def simulation_loop():
             
         save_state()
 
+async def websocket_loop():
+    global kiwoom_ws
+    logger.info("Starting WebSocket background connection monitor.")
+    while True:
+        await asyncio.sleep(5)
+        if not state["simulation_mode"]:
+            if kiwoom_ws is None:
+                kiwoom_ws = KiwoomWebSocket(token_mgr, ws_message_handler)
+            
+            if not kiwoom_ws.is_connected:
+                try:
+                    logger.info("Attempting to connect Kiwoom WebSocket...")
+                    await kiwoom_ws.connect()
+                    for cond_id in state["active_conditions"]:
+                        logger.info(f"Re-subscribing condition {cond_id} on reconnect...")
+                        await asyncio.get_running_loop().run_in_executor(None, kiwoom_client.request_condition_realtime, cond_id)
+                except Exception as e:
+                    logger.error(f"WebSocket reconnection failed: {e}")
+        else:
+            if kiwoom_ws and kiwoom_ws.is_connected:
+                logger.info("Disconnecting WebSocket because simulation mode is active.")
+                await kiwoom_ws.disconnect()
+
+async def real_trading_loop():
+    logger.info("Started real trading background monitor loop.")
+    while True:
+        await asyncio.sleep(3) # Check every 3 seconds
+        if state["simulation_mode"]:
+            continue
+            
+        if not state["general_info"]["is_connected"]:
+            continue
+            
+        now_time = datetime.now()
+        current_time_str = now_time.strftime("%H:%M:%S")
+        current_hm = datetime.strptime(now_time.strftime("%H:%M"), "%H:%M")
+        
+        # Parse time limits
+        try:
+            sell_to = datetime.strptime(state["settings"]["sell_time_to"], "%H:%M")
+            is_sell_time_past = current_hm > sell_to
+        except Exception as e:
+            logger.error(f"Failed to parse sell time limit: {e}")
+            is_sell_time_past = False
+            
+        # 1. Periodically refresh holdings to get actual cur_prc and prft_rt
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, update_kiwoom_connection)
+        except Exception as e:
+            logger.warning(f"[실거래 감시] 계좌 정보 갱신 실패: {e}")
+            continue
+            
+        # 2. Check each holding for exit conditions
+        holdings_to_sell = []
+        
+        for h in state["holdings"]:
+            stk_cd = h["stk_cd"]
+            pnl_rate = h.get("prft_rt", 0.0)
+            cur_prc = h.get("cur_prc", 0)
+            
+            # peak_price and peak_profit_rate tracking
+            if "peak_price" not in h or h["peak_price"] is None or h["peak_price"] == 0:
+                h["peak_price"] = cur_prc
+            if "peak_profit_rate" not in h or h["peak_profit_rate"] is None:
+                h["peak_profit_rate"] = pnl_rate
+                
+            if cur_prc > h["peak_price"]:
+                h["peak_price"] = cur_prc
+                h["peak_profit_rate"] = pnl_rate
+                
+            trailing_stop_pct = state["settings"]["trailing_stop_pct"]
+            stop_loss_pct = state["settings"]["stop_loss_pct"]
+            
+            # Sell if past market hours
+            if is_sell_time_past:
+                holdings_to_sell.append((h, "시간 경과 강제 매도"))
+            # Stop Loss
+            elif pnl_rate <= -stop_loss_pct:
+                holdings_to_sell.append((h, f"손절선 이탈 ({stop_loss_pct}%)"))
+            # Trailing Stop
+            elif h["peak_profit_rate"] >= trailing_stop_pct and (h["peak_profit_rate"] - pnl_rate) >= trailing_stop_pct:
+                holdings_to_sell.append((h, f"최고점 대비 하락 익절 (PEAK {h['peak_profit_rate']}% -> {h['prft_rt']}%)"))
+                
+        # 3. Process automated real sells
+        for h, reason in holdings_to_sell:
+            stk_cd = h["stk_cd"]
+            stk_nm = h["stk_nm"]
+            qty = h.get("trde_able_qty", h.get("rmnd_qty", 0))
+            cur_prc = h.get("cur_prc", 0)
+            pnl_rate = h.get("prft_rt", 0.0)
+            
+            if qty <= 0:
+                logger.warning(f"[실거래 감시] {stk_nm}({stk_cd}) 매도 대상이나 매매가능수량(trde_able_qty)이 0입니다.")
+                continue
+                
+            logger.info(f"[실거래 감시] 자동 매도 조건 감지: {stk_nm}({stk_cd}) - 사유: {reason}. 주문 집행합니다.")
+            
+            try:
+                loop = asyncio.get_running_loop()
+                res = await loop.run_in_executor(None, kiwoom_client.place_order, stk_cd, qty, 0, "3", "sell")
+                
+                if res.get("return_code") == 0:
+                    logger.info(f"[실거래 감시] 자동 매도 주문 성공: {stk_nm}({stk_cd}) - {res.get('return_msg')}")
+                    state["trade_history"].insert(0, {
+                        "time": current_time_str,
+                        "stk_cd": stk_cd,
+                        "stk_nm": stk_nm,
+                        "side": "매도",
+                        "qty": qty,
+                        "price": cur_prc,
+                        "amt": cur_prc * qty,
+                        "pnl_rate": pnl_rate,
+                        "reason": f"자동 매도 ({reason})"
+                    })
+                    await loop.run_in_executor(None, update_kiwoom_connection)
+                else:
+                    logger.error(f"[실거래 감시] 자동 매도 주문 실패: {res.get('return_msg')}")
+            except Exception as e:
+                logger.error(f"[실거래 감시] 자동 매도 처리 중 오류 발생: {e}")
+                
+        save_state()
+
 # Start background simulation task when FastAPI starts
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(simulation_loop())
+    asyncio.create_task(websocket_loop())
+    asyncio.create_task(real_trading_loop())
