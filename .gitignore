@@ -2,6 +2,11 @@
 config/*appkey.txt
 config/*secretkey.txt
 config/credentials.json
+config/state.json
+
+# Logs
+*.log
+autostock.log
 
 # Python environment
 venv/
