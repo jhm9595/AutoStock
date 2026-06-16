@@ -250,10 +250,10 @@ function App() {
       </header>
 
       {/* 3-Column Compact Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start flex-grow">
+      <div className="workspace-grid flex-grow">
         
         {/* ================= COLUMN 1 (Left): Info & Toggles & Settings ================= */}
-        <div className="lg:col-span-3 flex flex-col gap-4">
+        <div className="flex flex-col gap-4">
           
           {/* 1) 일반 정보 및 계좌 정보 카드 (Compact) */}
           <div className="card" style={{ padding: '14px' }}>
@@ -286,33 +286,35 @@ function App() {
             </div>
           </div>
 
-          {/* 3) 조건검색 연결/해제 영역 (Compact) */}
+          {/* 3) 조건검색 연결/해제 영역 (Compact & Sleek) */}
           <div className="card" style={{ padding: '14px' }}>
             <div className="card-title">
               <span>조건 탐지 실시간 연동</span>
-              <span className="badge badge-connected text-[10px] font-mono">{active_conditions.length} 활성화</span>
+              <span className="badge badge-connected text-[10px] font-mono" style={{ backgroundColor: '#f1f5f9', color: '#475569' }}>
+                {active_conditions.length}개 연동중
+              </span>
             </div>
-            <div className="flex flex-col gap-1.5">
+            
+            <div className="flex flex-col gap-2.5">
               {condition_search_list.map((cond) => {
                 const isActive = active_conditions.includes(cond.id);
                 return (
-                  <button 
+                  <div 
                     key={cond.id}
-                    onClick={() => handleToggleCondition(cond.id)}
-                    className={`flex items-center justify-between p-2 rounded-xl text-left border transition-all text-xs ${
-                      isActive 
-                        ? 'bg-neutral-900 text-white border-neutral-900 font-bold' 
-                        : 'bg-neutral-50 text-neutral-600 border-neutral-200/80 hover:bg-neutral-100'
-                    }`}
+                    className="flex justify-between items-center py-1.5 px-1 border-b border-neutral-100/50 text-xs"
+                    style={{ borderBottom: '1px solid #f8fafc' }}
                   >
-                    <div className="flex items-center gap-2">
-                      <Power size={12} className={isActive ? 'text-white' : 'text-neutral-400'} />
-                      <span>{cond.name}</span>
-                    </div>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-lg ${isActive ? 'bg-white text-black' : 'bg-neutral-200 text-neutral-500'}`}>
-                      {isActive ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
+                    <span className="font-semibold text-neutral-700">{cond.name}</span>
+                    
+                    <label className="switch">
+                      <input 
+                        type="checkbox" 
+                        checked={isActive} 
+                        onChange={() => handleToggleCondition(cond.id)}
+                      />
+                      <span className="switch-slider"></span>
+                    </label>
+                  </div>
                 );
               })}
             </div>
@@ -430,7 +432,7 @@ function App() {
         </div>
 
         {/* ================= COLUMN 2 (Middle): Portfolio Holdings & Manual Order ================= */}
-        <div className="lg:col-span-5 flex flex-col gap-4">
+        <div className="flex flex-col gap-4">
           
           {/* 6) 보유 종목 정보 영역 (Table-based for extreme space efficiency) */}
           <div className="card flex flex-col" style={{ minHeight: '400px', padding: '14px' }}>
@@ -565,7 +567,7 @@ function App() {
         </div>
 
         {/* ================= COLUMN 3 (Right): Detections & Trades Logs ================= */}
-        <div className="lg:col-span-4 flex flex-col gap-4">
+        <div className="flex flex-col gap-4">
           
           {/* 2 & 4) 실시간 조건 탐지 결과 및 이력 (Compact height limit) */}
           <div className="card flex flex-col" style={{ height: '270px', padding: '14px' }}>
