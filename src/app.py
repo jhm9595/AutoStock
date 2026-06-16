@@ -72,7 +72,7 @@ state = {
     "detected_history": [],
     "trade_history": [],
     "holdings": [],
-    "simulation_mode": True
+    "simulation_mode": False
 }
 
 def load_state():
@@ -119,17 +119,26 @@ def update_kiwoom_connection():
                 state["general_info"]["account_no"] = accounts[0]
                 state["general_info"]["is_connected"] = True
                 
-                # Fetch actual deposit
+                # Fetch actual deposit (Available funds)
                 try:
                     dep = kiwoom_client.get_deposit_details()
+                    # Use ord_alow_amt, fall back to d2_pymn_alow_amt then pymn_alow_amt if unavailable
+                    avail_funds = dep.get("ord_alow_amt")
+                    if avail_funds is None or avail_funds == 0:
+                        avail_funds = dep.get("d2_pymn_alow_amt", dep.get("pymn_alow_amt", 10000000))
+                    state["general_info"]["available_funds"] = avail_funds
                     state["general_info"]["balance"] = dep.get("pymn_alow_amt", 10000000)
-                    state["general_info"]["available_funds"] = dep.get("ord_alow_amt", 10000000)
                 except Exception as e:
                     logger.warning(f"Failed to fetch live deposit: {e}")
                     
-                # Fetch holdings
+                # Fetch holdings and Real Balance (Estimate Deposit Assets)
                 try:
                     bal = kiwoom_client.get_account_balance()
+                    # Update real balance from Account Balance (prsm_dpst_aset_amt)
+                    real_balance = bal.get("prsm_dpst_aset_amt")
+                    if real_balance is not None and real_balance > 0:
+                        state["general_info"]["balance"] = real_balance
+                    
                     # Map live holdings to local structure
                     holdings = []
                     for h in bal.get("holdings", []):

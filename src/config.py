@@ -42,19 +42,14 @@ if secretkey_files:
     except Exception as e:
         logger.error(f"Failed to read secretkey file: {e}")
 
-# Domains
-MOCK_DOMAIN = "https://mockapi.kiwoom.com"
-PROD_DOMAIN = "https://api.kiwoom.com"
+# DEFAULT SETTING: Real Trading (Using production API by default)
+IS_MOCK = False
 
-MOCK_WS_DOMAIN = "wss://mockapi.kiwoom.com:10000"
+PROD_DOMAIN = "https://api.kiwoom.com"
 PROD_WS_DOMAIN = "wss://api.kiwoom.com:10000"
 
-# DEFAULT SETTING: Mock Trading (Safe for development)
-# Change to False for Real Trading
-IS_MOCK = True
+BASE_URL = PROD_DOMAIN
+WS_URL = PROD_WS_DOMAIN
 
-BASE_URL = MOCK_DOMAIN if IS_MOCK else PROD_DOMAIN
-WS_URL = MOCK_WS_DOMAIN if IS_MOCK else PROD_WS_DOMAIN
-
-logger.info(f"Configuration initialized. Mode: {'Mock Trading' if IS_MOCK else 'Real Trading'}")
+logger.info("Configuration initialized. Mode: Real Trading")
 logger.info(f"REST URL: {BASE_URL} / WS URL: {WS_URL}")
