@@ -325,17 +325,19 @@ function App() {
             <div className="card-title">봇 거래 매개변수 설정</div>
             <form onSubmit={handleSaveSettings} className="flex flex-col gap-3">
               
-              <div className="flex justify-between items-center p-2 rounded-xl bg-neutral-50 border border-neutral-200/80">
+              <div className="flex justify-between items-center p-3 rounded-2xl bg-neutral-50/60 border border-neutral-200/50" style={{ marginBottom: '4px' }}>
                 <div>
-                  <p className="text-[11px] font-bold text-neutral-700">조건 포착 시 자동 매수</p>
-                  <p className="text-[9px] text-neutral-500">실시간 매수 주문 즉시 실행</p>
+                  <p className="text-[11.5px] font-bold text-neutral-800 tracking-tight">자동 매수 봇 활성화</p>
+                  <p className="text-[9.5px] text-neutral-500 font-medium">조건식 탐지 즉시 자동 매입 실행</p>
                 </div>
-                <input 
-                  type="checkbox"
-                  checked={settingsForm.auto_buy}
-                  onChange={(e) => setSettingsForm({ ...settingsForm, auto_buy: e.target.checked })}
-                  className="w-4 h-4 accent-black"
-                />
+                <label className="switch">
+                  <input 
+                    type="checkbox"
+                    checked={settingsForm.auto_buy}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, auto_buy: e.target.checked })}
+                  />
+                  <span className="switch-slider"></span>
+                </label>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
