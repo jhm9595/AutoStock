@@ -1,8 +1,55 @@
 import requests
 import logging
+import time
+import collections
+import threading
 from src import config
 
 logger = logging.getLogger("AutoStock.API")
+limiter_logger = logging.getLogger("AutoStock.RateLimiter")
+
+class KiwoomRateLimiter:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.history = collections.deque()
+        
+        # Limit definitions: (duration_seconds, max_calls)
+        self.limits = [
+            (1.0, 5),      # 5 calls per 1 second
+            (60.0, 100),   # 100 calls per 1 minute
+            (3600.0, 1000) # 1000 calls per 1 hour
+        ]
+
+    def wait_if_needed(self):
+        with self.lock:
+            while True:
+                now = time.time()
+                
+                # Remove timestamps older than 3600 seconds
+                while self.history and self.history[0] < now - 3600.0:
+                    self.history.popleft()
+                
+                sleep_needed = 0.0
+                for duration, max_calls in self.limits:
+                    # Filter history to current window duration
+                    window_calls = [t for t in self.history if t >= now - duration]
+                    if len(window_calls) >= max_calls:
+                        # Find the oldest timestamp in the current window that must exit
+                        oldest_in_window = window_calls[len(window_calls) - max_calls]
+                        wait_time = (oldest_in_window + duration) - now
+                        if wait_time > sleep_needed:
+                            sleep_needed = wait_time
+                
+                if sleep_needed > 0:
+                    limiter_logger.warning(
+                        f"Rate limit reached. Sleeping for {sleep_needed:.3f} seconds "
+                        f"to comply with Kiwoom API limits (5/s, 100/m, 1000/h)."
+                    )
+                    time.sleep(sleep_needed)
+                    # Loop again to re-check all windows after sleep
+                else:
+                    self.history.append(time.time())
+                    break
 
 def parse_numeric(val):
     """Utility to parse padded numbers (e.g. '000000017598258' or '-00000032') into Python numeric types."""
@@ -21,6 +68,7 @@ def parse_numeric(val):
 class KiwoomClient:
     def __init__(self, token_manager):
         self.token_manager = token_manager
+        self.rate_limiter = KiwoomRateLimiter()
 
     def _get_common_headers(self, api_id, cont_yn="N", next_key=""):
         """Generates standard headers for Kiwoom REST API requests."""
@@ -37,6 +85,9 @@ class KiwoomClient:
 
     def _post(self, api_id, url_path, body=None, cont_yn="N", next_key=""):
         """Internal helper for POST requests."""
+        # Wait if Kiwoom rate limit is reached
+        self.rate_limiter.wait_if_needed()
+
         url = f"{config.BASE_URL}{url_path}"
         headers = self._get_common_headers(api_id, cont_yn, next_key)
         body = body or {}
