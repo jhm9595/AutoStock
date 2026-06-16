@@ -10,9 +10,7 @@ import {
   RefreshCw, 
   Power, 
   AlertCircle,
-  Play,
   Trash2,
-  TrendingDown,
   DollarSign
 } from 'lucide-react';
 
@@ -52,7 +50,6 @@ function App() {
       if (!response.ok) throw new Error('Failed to connect to trading backend');
       const data = await response.json();
       setState(data);
-      // Initialize settings form if not edited
       if (data.settings) {
         setSettingsForm(data.settings);
       }
@@ -64,7 +61,6 @@ function App() {
     }
   };
 
-  // Poll state every 1 second
   useEffect(() => {
     fetchState();
     const interval = setInterval(fetchState, 1000);
@@ -78,26 +74,21 @@ function App() {
       const response = await fetch(`${BACKEND_URL}/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: json_stringify_numbers(settingsForm)
+        body: JSON.stringify({
+          ...settingsForm,
+          buy_budget_per_stock: Number(settingsForm.buy_budget_per_stock),
+          daily_budget_limit: Number(settingsForm.daily_budget_limit),
+          trailing_stop_pct: Number(settingsForm.trailing_stop_pct),
+          stop_loss_pct: Number(settingsForm.stop_loss_pct)
+        })
       });
       const data = await response.json();
       if (data.status === 'success') {
-        alert('설정이 저장되었습니다.');
+        alert('거래 파라미터가 저장되었습니다.');
       }
     } catch (err) {
       alert(`설정 저장 실패: ${err.message}`);
     }
-  };
-
-  // Convert input fields to numbers where appropriate
-  const json_stringify_numbers = (form) => {
-    return JSON.stringify({
-      ...form,
-      buy_budget_per_stock: Number(form.buy_budget_per_stock),
-      daily_budget_limit: Number(form.daily_budget_limit),
-      trailing_stop_pct: Number(form.trailing_stop_pct),
-      stop_loss_pct: Number(form.stop_loss_pct)
-    });
   };
 
   // Toggle Condition Connection
@@ -130,7 +121,7 @@ function App() {
 
   // Reset Simulation
   const handleResetSimulation = async () => {
-    if (!window.confirm("시뮬레이션 이력 및 보유잔고를 초기화하시겠습니까?")) return;
+    if (!window.confirm("시뮬레이션 데이터(잔고 및 매매이력)를 초기화하시겠습니까?")) return;
     try {
       await fetch(`${BACKEND_URL}/api/simulation/reset`, { method: 'POST' });
       fetchState();
@@ -154,7 +145,7 @@ function App() {
       });
       const data = await response.json();
       if (response.ok && data.status === 'success') {
-        alert('주문이 전송되었습니다.');
+        alert('주문 전송 완료');
       } else {
         alert(`주문 실패: ${data.detail || '오류 발생'}`);
       }
@@ -178,9 +169,7 @@ function App() {
         })
       });
       const data = await response.json();
-      if (response.ok && data.status === 'success') {
-        logger.info('Immediate sell succeeded');
-      } else {
+      if (!response.ok) {
         alert(`매도 실패: ${data.detail}`);
       }
     } catch (err) {
@@ -190,20 +179,20 @@ function App() {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen" style={{ backgroundColor: '#0a0a0a', color: '#fff' }}>
-        <RefreshCw className="animate-spin text-white mb-4" size={40} />
-        <p className="text-sm font-medium tracking-wider">주식 자동 매매 시스템 서버 연결 중...</p>
+      <div className="flex flex-col items-center justify-center min-h-screen" style={{ backgroundColor: '#f6f8fa', color: '#1a1f26' }}>
+        <RefreshCw className="animate-spin text-neutral-800 mb-4" size={40} />
+        <p className="text-sm font-semibold tracking-wider">자동 매매 시스템 로드 중...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen" style={{ backgroundColor: '#0a0a0a', color: '#fff', padding: '20px' }}>
-        <AlertCircle className="text-red-500 mb-4" size={48} style={{ color: '#ff4444' }} />
-        <h1 className="text-lg font-bold mb-2">백엔드 서버와 통신할 수 없습니다.</h1>
-        <p className="text-sm text-gray-500 mb-6 text-center max-w-md">주식 자동매매 백엔드 서버(FastAPI)가 실행되고 있는지 확인해 주십시오.<br/>(실행 명령: python -m uvicorn src.app:app --reload)</p>
-        <button onClick={fetchState} className="btn btn-primary">다시 시도</button>
+      <div className="flex flex-col items-center justify-center min-h-screen" style={{ backgroundColor: '#f6f8fa', color: '#1a1f26', padding: '20px' }}>
+        <AlertCircle className="mb-4 text-red-500" size={48} style={{ color: '#e53e3e' }} />
+        <h1 className="text-lg font-bold mb-2">백엔드 서버 연결 끊김</h1>
+        <p className="text-xs text-neutral-500 mb-6 text-center max-w-sm"> FastApi 서버가 작동하고 있지 않습니다.<br/>터미널에서 서버 기동 명령을 다시 확인해주세요. </p>
+        <button onClick={fetchState} className="btn btn-primary">서버 다시 연결</button>
       </div>
     );
   }
@@ -211,143 +200,117 @@ function App() {
   const { general_info, settings, condition_search_list, active_conditions, detected_history, trade_history, holdings, simulation_mode } = state;
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ padding: '20px', maxWidth: '1600px', margin: '0 auto' }}>
+    <div className="flex flex-col" style={{ padding: '15px 24px', minHeight: '100vh', maxWidth: '1800px', margin: '0 auto', gap: '16px' }}>
       
-      {/* 1. Header (메인 헤더 영역) */}
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 mb-6" style={{ borderColor: '#222' }}>
+      {/* Header (메인 헤더) */}
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-neutral-200/60 pb-3" style={{ borderColor: '#e9ecef' }}>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ letterSpacing: '-0.03em' }}>
-            AUTOSTOCK <span className="text-xs font-normal px-2 py-0.5 ml-2 border border-gray-700 text-gray-400 rounded">ALGO SYSTEM</span>
+          <h1 className="text-xl font-extrabold tracking-tight flex items-center gap-2" style={{ color: '#111' }}>
+            AUTOSTOCK
+            <span className="text-[10px] font-bold px-2 py-0.5 border border-neutral-300 text-neutral-500 rounded-lg bg-neutral-100">DESK</span>
           </h1>
-          <p className="text-xs text-gray-500 mt-1">로컬 물리 PC 키움증권 Open API 연동 자동 거래 데스크</p>
+          <p className="text-[10.5px] text-neutral-500 font-medium">키움증권 API 기반 자동 거래 및 모니터링 시스템</p>
         </div>
         
-        <div className="flex flex-wrap gap-3 mt-4 md:mt-0 items-center">
+        <div className="flex gap-2.5 mt-3 sm:mt-0 items-center">
           {/* Mode Switcher */}
-          <div className="flex bg-neutral-900 border border-neutral-800 rounded p-1">
+          <div className="flex bg-neutral-200/70 border border-neutral-300/40 rounded-xl p-0.5">
             <button 
               onClick={() => handleToggleMode(true)}
-              className={`text-xs px-3 py-1.5 rounded transition-all ${simulation_mode ? 'bg-white text-black font-semibold' : 'text-gray-400 hover:text-white'}`}
+              className={`text-[11px] px-3 py-1.5 rounded-lg transition-all ${simulation_mode ? 'bg-white text-black font-bold shadow-sm' : 'text-neutral-500 hover:text-black'}`}
             >
               모의 시뮬레이션
             </button>
             <button 
               onClick={() => handleToggleMode(false)}
-              className={`text-xs px-3 py-1.5 rounded transition-all ${!simulation_mode ? 'bg-white text-black font-semibold' : 'text-gray-400 hover:text-white'}`}
+              className={`text-[11px] px-3 py-1.5 rounded-lg transition-all ${!simulation_mode ? 'bg-white text-black font-bold shadow-sm' : 'text-neutral-500 hover:text-black'}`}
             >
-              실거래 (Kiwoom Live)
+              실거래 모드
             </button>
           </div>
 
           {simulation_mode && (
             <button 
               onClick={handleResetSimulation} 
-              className="btn btn-secondary text-xs flex items-center gap-1 text-red-500 border-red-950/40 hover:bg-red-950/20"
-              style={{ borderColor: 'rgba(255, 68, 68, 0.2)', color: '#ff4444' }}
+              className="btn btn-secondary text-[11px] py-1.5 px-3 flex items-center gap-1 rounded-xl text-red-600 hover:bg-red-50 border-red-100"
             >
-              <Trash2 size={13} />
-              시뮬레이터 리셋
+              <Trash2 size={12} />
+              시뮬레이터 초기화
             </button>
           )}
 
-          {/* Connection Indicator */}
-          <div className="flex items-center gap-2 border border-neutral-800 px-3 py-1.5 rounded bg-neutral-900/50">
-            <div className={`w-2 h-2 rounded-full ${general_info.is_connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} style={{ backgroundColor: general_info.is_connected ? '#22c55e' : '#ff4444' }}></div>
-            <span className="text-xs text-gray-400 font-medium">
+          {/* Connection status */}
+          <div className="flex items-center gap-1.5 border border-neutral-200 px-3 py-1.5 rounded-xl bg-white shadow-sm">
+            <div className={`w-2.5 h-2.5 rounded-full ${general_info.is_connected ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ backgroundColor: general_info.is_connected ? '#10b981' : '#f43f5e' }}></div>
+            <span className="text-[11px] font-bold text-neutral-600">
               {general_info.is_connected ? 'API 연결완료' : 'API 연결끊김'}
             </span>
           </div>
         </div>
       </header>
 
-      {/* 2. Top Banner - Account summary (일반적인 정보 영역) */}
-      <section className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        <div className="card flex items-center gap-3">
-          <div className="p-2.5 bg-neutral-900 rounded border border-neutral-800">
-            <User size={18} className="text-gray-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase font-medium">거래 계좌번호</p>
-            <p className="font-semibold text-sm mono tracking-wide">{general_info.account_no}</p>
-          </div>
-        </div>
-
-        <div className="card flex items-center gap-3">
-          <div className="p-2.5 bg-neutral-900 rounded border border-neutral-800">
-            <DollarSign size={18} className="text-gray-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase font-medium">총 잔고평가액</p>
-            <p className="font-bold text-sm tracking-tight">{general_info.balance.toLocaleString()} 원</p>
-          </div>
-        </div>
-
-        <div className="card flex items-center gap-3">
-          <div className="p-2.5 bg-neutral-900 rounded border border-neutral-800">
-            <Activity size={18} className="text-gray-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase font-medium">주문 가능 금액</p>
-            <p className="font-bold text-sm tracking-tight">{general_info.available_funds.toLocaleString()} 원</p>
-          </div>
-        </div>
-
-        <div className="card flex items-center gap-3">
-          <div className="p-2.5 bg-neutral-900 rounded border border-neutral-800">
-            <Shield size={18} className="text-gray-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase font-medium">로그인 일자</p>
-            <p className="text-xs font-medium mono text-gray-300">{general_info.login_date}</p>
-          </div>
-        </div>
-
-        <div className="card flex items-center gap-3 col-span-2 md:col-span-1">
-          <div className="p-2.5 bg-neutral-900 rounded border border-neutral-800">
-            <Layers size={18} className="text-gray-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase font-medium">영업 요일</p>
-            <p className="text-sm font-semibold">{general_info.day_of_week}</p>
-          </div>
-        </div>
-      </section>
-
-      {/* Main Grid Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* 3-Column Compact Workspace */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start flex-grow">
         
-        {/* Left column: Conditions & Settings (3) & Settings Area (7) */}
-        <div className="lg:col-span-4 flex flex-col gap-6">
+        {/* ================= COLUMN 1 (Left): Info & Toggles & Settings ================= */}
+        <div className="lg:col-span-3 flex flex-col gap-4">
           
-          {/* 3) 조건검색 연결/해제 영역 */}
-          <div className="card">
+          {/* 1) 일반 정보 및 계좌 정보 카드 (Compact) */}
+          <div className="card" style={{ padding: '14px' }}>
             <div className="card-title">
-              <span>조건검색 실시간 연동</span>
-              <span className="text-xs font-normal text-gray-500">{active_conditions.length}개 활성</span>
+              <span>계좌 상태 요약</span>
+              <span className="badge badge-connected text-[10px]">{simulation_mode ? '모의' : '실제'}</span>
             </div>
-            <p className="text-xs text-gray-400 mb-4">키움증권 서버에서 조건에 감지된 종목을 연동합니다. 클릭하여 조건 실시간 탐지를 활성화/비활성화 하십시오.</p>
             
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2.5 text-xs">
+              <div className="flex justify-between items-center py-1 border-b border-neutral-100">
+                <span className="text-neutral-500 flex items-center gap-1"><User size={13}/>계좌번호</span>
+                <span className="font-bold mono text-neutral-800">{general_info.account_no}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-neutral-100">
+                <span className="text-neutral-500 flex items-center gap-1"><DollarSign size={13}/>총 잔고평가액</span>
+                <span className="font-extrabold text-neutral-800 text-sm">{general_info.balance.toLocaleString()} 원</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-neutral-100">
+                <span className="text-neutral-500 flex items-center gap-1"><Activity size={13}/>주문 가능 현금</span>
+                <span className="font-bold text-neutral-700">{general_info.available_funds.toLocaleString()} 원</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-neutral-100">
+                <span className="text-neutral-500 flex items-center gap-1"><Shield size={13}/>마지막 갱신</span>
+                <span className="font-medium mono text-neutral-700 text-[10.5px]">{general_info.login_date.split(' ')[1] || general_info.login_date}</span>
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <span className="text-neutral-500 flex items-center gap-1"><Layers size={13}/>영업 요일</span>
+                <span className="font-bold text-neutral-700">{general_info.day_of_week}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 3) 조건검색 연결/해제 영역 (Compact) */}
+          <div className="card" style={{ padding: '14px' }}>
+            <div className="card-title">
+              <span>조건 탐지 실시간 연동</span>
+              <span className="badge badge-connected text-[10px] font-mono">{active_conditions.length} 활성화</span>
+            </div>
+            <div className="flex flex-col gap-1.5">
               {condition_search_list.map((cond) => {
                 const isActive = active_conditions.includes(cond.id);
                 return (
                   <button 
                     key={cond.id}
                     onClick={() => handleToggleCondition(cond.id)}
-                    className={`flex items-center justify-between p-3 rounded border text-left transition-all ${
+                    className={`flex items-center justify-between p-2 rounded-xl text-left border transition-all text-xs ${
                       isActive 
-                        ? 'bg-white text-black border-white font-medium' 
-                        : 'bg-neutral-900 text-gray-300 border-neutral-800 hover:border-neutral-700'
+                        ? 'bg-neutral-900 text-white border-neutral-900 font-bold' 
+                        : 'bg-neutral-50 text-neutral-600 border-neutral-200/80 hover:bg-neutral-100'
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <Power size={14} className={isActive ? 'text-black' : 'text-gray-500'} />
-                      <span className="text-xs font-medium">{cond.name}</span>
+                      <Power size={12} className={isActive ? 'text-white' : 'text-neutral-400'} />
+                      <span>{cond.name}</span>
                     </div>
-                    <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded ${
-                      isActive ? 'bg-black text-white' : 'bg-neutral-950 text-gray-500 border border-neutral-800'
-                    }`}>
-                      {isActive ? 'ACTIVE' : 'OFF'}
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-lg ${isActive ? 'bg-white text-black' : 'bg-neutral-200 text-neutral-500'}`}>
+                      {isActive ? 'ON' : 'OFF'}
                     </span>
                   </button>
                 );
@@ -355,286 +318,245 @@ function App() {
             </div>
           </div>
 
-          {/* 7) 상세 거래 설정 영역 */}
-          <div className="card">
-            <div className="card-title">주식 자동매매 조건 설정</div>
-            <form onSubmit={handleSaveSettings} className="flex flex-col gap-4">
+          {/* 7) 자동 거래 설정 영역 (Compact) */}
+          <div className="card" style={{ padding: '14px' }}>
+            <div className="card-title">봇 거래 매개변수 설정</div>
+            <form onSubmit={handleSaveSettings} className="flex flex-col gap-3">
               
-              <div className="flex justify-between items-center p-3 rounded bg-neutral-900 border border-neutral-800">
+              <div className="flex justify-between items-center p-2 rounded-xl bg-neutral-50 border border-neutral-200/80">
                 <div>
-                  <p className="text-xs font-semibold">조건 포착 시 자동 매수</p>
-                  <p className="text-[10px] text-gray-500">감지 즉시 시장가 자동 주문 실행</p>
+                  <p className="text-[11px] font-bold text-neutral-700">조건 포착 시 자동 매수</p>
+                  <p className="text-[9px] text-neutral-500">실시간 매수 주문 즉시 실행</p>
                 </div>
                 <input 
                   type="checkbox"
                   checked={settingsForm.auto_buy}
                   onChange={(e) => setSettingsForm({ ...settingsForm, auto_buy: e.target.checked })}
-                  className="w-4 h-4 accent-white"
+                  className="w-4 h-4 accent-black"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">종목당 매수 예산</label>
+                  <label className="block text-[9.5px] font-bold text-neutral-500 uppercase tracking-tight mb-1">종목 매수금액</label>
                   <input 
                     type="number"
                     value={settingsForm.buy_budget_per_stock}
                     onChange={(e) => setSettingsForm({ ...settingsForm, buy_budget_per_stock: e.target.value })}
-                    className="input font-medium mono"
-                    placeholder="예: 1000000"
+                    className="input font-bold mono"
                   />
-                  <span className="text-[10px] text-gray-500 mt-1 block">{(settingsForm.buy_budget_per_stock / 10000).toLocaleString()}만 원</span>
+                  <span className="text-[9px] text-neutral-400 block mt-0.5">{(settingsForm.buy_budget_per_stock / 10000).toLocaleString()}만 원</span>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">당일 최대 매수 한도</label>
+                  <label className="block text-[9.5px] font-bold text-neutral-500 uppercase tracking-tight mb-1">당일 총 매수한도</label>
                   <input 
                     type="number"
                     value={settingsForm.daily_budget_limit}
                     onChange={(e) => setSettingsForm({ ...settingsForm, daily_budget_limit: e.target.value })}
-                    className="input font-medium mono"
-                    placeholder="예: 5000000"
+                    className="input font-bold mono"
                   />
-                  <span className="text-[10px] text-gray-500 mt-1 block">{(settingsForm.daily_budget_limit / 10000).toLocaleString()}만 원</span>
+                  <span className="text-[9px] text-neutral-400 block mt-0.5">{(settingsForm.daily_budget_limit / 10000).toLocaleString()}만 원</span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">매수 가능 시간 (FROM)</label>
-                  <input 
-                    type="text"
-                    value={settingsForm.buy_time_from}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, buy_time_from: e.target.value })}
-                    className="input font-medium mono text-center"
-                    placeholder="09:00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">매수 마감 시간 (TO)</label>
-                  <input 
-                    type="text"
-                    value={settingsForm.buy_time_to}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, buy_time_to: e.target.value })}
-                    className="input font-medium mono text-center"
-                    placeholder="15:20"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">청산 매도 시간 (FROM)</label>
-                  <input 
-                    type="text"
-                    value={settingsForm.sell_time_from}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, sell_time_from: e.target.value })}
-                    className="input font-medium mono text-center"
-                    placeholder="09:00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">청산 마감 시간 (TO)</label>
-                  <input 
-                    type="text"
-                    value={settingsForm.sell_time_to}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, sell_time_to: e.target.value })}
-                    className="input font-medium mono text-center"
-                    placeholder="15:30"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">손절선 하락폭 (%)</label>
-                  <div className="relative">
+                  <label className="block text-[9.5px] font-bold text-neutral-500 uppercase tracking-tight mb-1">매수시간 (시작/마감)</label>
+                  <div className="flex gap-1">
                     <input 
-                      type="number"
-                      step="0.1"
-                      value={settingsForm.stop_loss_pct}
-                      onChange={(e) => setSettingsForm({ ...settingsForm, stop_loss_pct: e.target.value })}
-                      className="input font-medium mono"
-                      placeholder="2.0"
+                      type="text" 
+                      value={settingsForm.buy_time_from} 
+                      onChange={(e) => setSettingsForm({ ...settingsForm, buy_time_from: e.target.value })}
+                      className="input font-bold text-center p-1"
                     />
-                    <span className="absolute right-3 top-2.5 text-xs text-gray-500">%</span>
-                  </div>
-                  <span className="text-[10px] text-gray-500 mt-1 block">매입가 대비 하락 시 즉시 손절</span>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] uppercase tracking-wider text-gray-400 mb-1.5">익절 트레일링 스톱 (%)</label>
-                  <div className="relative">
                     <input 
-                      type="number"
-                      step="0.1"
-                      value={settingsForm.trailing_stop_pct}
-                      onChange={(e) => setSettingsForm({ ...settingsForm, trailing_stop_pct: e.target.value })}
-                      className="input font-medium mono"
-                      placeholder="1.5"
+                      type="text" 
+                      value={settingsForm.buy_time_to} 
+                      onChange={(e) => setSettingsForm({ ...settingsForm, buy_time_to: e.target.value })}
+                      className="input font-bold text-center p-1"
                     />
-                    <span className="absolute right-3 top-2.5 text-xs text-gray-500">%</span>
                   </div>
-                  <span className="text-[10px] text-gray-500 mt-1 block">최고 수익률 대비 하락 시 매도</span>
+                </div>
+                <div>
+                  <label className="block text-[9.5px] font-bold text-neutral-500 uppercase tracking-tight mb-1">청산시간 (시작/마감)</label>
+                  <div className="flex gap-1">
+                    <input 
+                      type="text" 
+                      value={settingsForm.sell_time_from} 
+                      onChange={(e) => setSettingsForm({ ...settingsForm, sell_time_from: e.target.value })}
+                      className="input font-bold text-center p-1"
+                    />
+                    <input 
+                      type="text" 
+                      value={settingsForm.sell_time_to} 
+                      onChange={(e) => setSettingsForm({ ...settingsForm, sell_time_to: e.target.value })}
+                      className="input font-bold text-center p-1"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <button type="submit" className="btn btn-primary w-full mt-2 font-semibold">
-                <Settings size={15} />
-                거래 파라미터 저장
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[9.5px] font-bold text-neutral-500 uppercase tracking-tight mb-1">손절선 범위 (%)</label>
+                  <input 
+                    type="number"
+                    step="0.1"
+                    value={settingsForm.stop_loss_pct}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, stop_loss_pct: e.target.value })}
+                    className="input font-bold mono text-center"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9.5px] font-bold text-neutral-500 uppercase tracking-tight mb-1">트레일링 익절 (%)</label>
+                  <input 
+                    type="number"
+                    step="0.1"
+                    value={settingsForm.trailing_stop_pct}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, trailing_stop_pct: e.target.value })}
+                    className="input font-bold mono text-center"
+                  />
+                </div>
+              </div>
+
+              <button type="submit" className="btn btn-primary w-full py-2 rounded-xl mt-1.5 font-bold text-[11px]">
+                <Settings size={13} />
+                거래 설정 저장
               </button>
             </form>
           </div>
 
         </div>
 
-        {/* Right column: Holdings (6) & Manual Order (optional) */}
-        <div className="lg:col-span-8 flex flex-col gap-6">
+        {/* ================= COLUMN 2 (Middle): Portfolio Holdings & Manual Order ================= */}
+        <div className="lg:col-span-5 flex flex-col gap-4">
           
-          {/* 6) 보유 종목 정보 영역 */}
-          <div className="card">
+          {/* 6) 보유 종목 정보 영역 (Table-based for extreme space efficiency) */}
+          <div className="card flex flex-col" style={{ minHeight: '400px', padding: '14px' }}>
             <div className="card-title">
               <span>내 보유 주식 포트폴리오</span>
-              <span className="text-xs font-mono font-medium border border-gray-800 bg-neutral-950 px-2.5 py-1 text-gray-300 rounded">
-                보유종목: {holdings.length}개
-              </span>
+              <span className="badge badge-connected text-[10px] font-mono">보유종목: {holdings.length}개</span>
             </div>
             
-            {holdings.length === 0 ? (
-              <div className="flex flex-col items-center justify-center p-12 bg-neutral-900/30 border border-dashed border-neutral-800 rounded-lg">
-                <TrendingUp size={28} className="text-neutral-700 mb-3" />
-                <p className="text-sm text-neutral-500">현재 보유 중인 포지션이 없습니다.</p>
-                <p className="text-xs text-neutral-600 mt-1">실시간 조건 검색 탐지 또는 수동 주문을 통해 주식을 매수하십시오.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {holdings.map((item) => {
-                  const isProfit = item.prft_rt >= 0;
-                  return (
-                    <div 
-                      key={item.stk_cd} 
-                      className="p-4 rounded border bg-neutral-900 border-neutral-800 flex flex-col justify-between"
-                      style={{ borderLeft: `4px solid ${isProfit ? 'var(--color-profit)' : 'var(--color-loss)'}` }}
-                    >
-                      <div>
-                        {/* Title details */}
-                        <div className="flex justify-between items-start mb-2">
+            <div className="overflow-y-auto flex-grow" style={{ maxHeight: '350px' }}>
+              {holdings.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-12 bg-neutral-50/50 border border-dashed border-neutral-200 rounded-2xl h-full">
+                  <TrendingUp size={24} className="text-neutral-300 mb-2" />
+                  <p className="text-xs text-neutral-500 font-bold">현재 보유중인 포지션이 없습니다.</p>
+                  <p className="text-[10px] text-neutral-400 mt-0.5 text-center">조건식 감지 활성화 시 자동 매수되거나 아래 폼에서 수동 주문할 수 있습니다.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {holdings.map((item) => {
+                    const isProfit = item.prft_rt >= 0;
+                    const profitColor = isProfit ? 'var(--color-profit)' : 'var(--color-loss)';
+                    return (
+                      <div 
+                        key={item.stk_cd}
+                        className="p-3 rounded-2xl border bg-white border-neutral-200/80 shadow-sm flex flex-col gap-2 transition-all hover:border-neutral-400"
+                        style={{ borderLeft: `4px solid ${profitColor}` }}
+                      >
+                        <div className="flex justify-between items-center">
                           <div>
-                            <h3 className="font-bold text-sm tracking-tight">{item.stk_nm}</h3>
-                            <p className="text-xs font-mono text-gray-500">{item.stk_cd}</p>
+                            <span className="font-extrabold text-xs text-neutral-800">{item.stk_nm}</span>
+                            <span className="text-[9.5px] font-mono text-neutral-400 ml-1.5">{item.stk_cd}</span>
                           </div>
-                          <span 
-                            className="text-xs font-bold font-mono px-2 py-0.5 rounded" 
-                            style={{ 
-                              backgroundColor: isProfit ? 'rgba(255, 68, 68, 0.1)' : 'rgba(51, 136, 255, 0.1)', 
-                              color: isProfit ? 'var(--color-profit)' : 'var(--color-loss)' 
-                            }}
-                          >
-                            {isProfit ? '+' : ''}{item.prft_rt}%
+                          
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10.5px] font-extrabold font-mono" style={{ color: profitColor }}>
+                              {isProfit ? '+' : ''}{item.prft_rt}%
+                            </span>
+                            <span className="text-[9px] text-neutral-400 font-mono">({item.buy_time})</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 py-1.5 border-t border-b border-neutral-100 text-[10.5px]">
+                          <div>
+                            <span className="text-[8.5px] text-neutral-400 uppercase font-bold block">보유량 / 매입가</span>
+                            <span className="font-bold text-neutral-700">{item.rmnd_qty}주</span> / <span className="font-medium mono text-neutral-600">{item.pur_pric.toLocaleString()}원</span>
+                          </div>
+                          <div>
+                            <span className="text-[8.5px] text-neutral-400 uppercase font-bold block">평가금액</span>
+                            <span className="font-bold text-neutral-800">{item.evlt_amt.toLocaleString()}원</span>
+                          </div>
+                          <div>
+                            <span className="text-[8.5px] text-neutral-400 uppercase font-bold block">최고 PEAK</span>
+                            <span className="font-bold font-mono" style={{ color: item.peak_profit_rate >= 0 ? 'var(--color-profit)' : 'var(--color-loss)' }}>
+                              {item.peak_profit_rate}%
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between items-center pt-0.5">
+                          <span className="text-[9px] text-neutral-500">
+                            현재가: <span className="font-semibold mono">{item.cur_prc.toLocaleString()}원</span>
                           </span>
-                        </div>
-
-                        {/* Financial figures */}
-                        <div className="grid grid-cols-2 gap-y-2 gap-x-4 py-3 border-t border-b border-neutral-800/60 my-2 text-xs">
-                          <div>
-                            <p className="text-[10px] text-gray-500 uppercase">보유 수량</p>
-                            <p className="font-semibold mono">{item.rmnd_qty.toLocaleString()} 주</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500 uppercase">매입 총금액</p>
-                            <p className="font-semibold mono">{item.pur_amt.toLocaleString()} 원</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500 uppercase">매입 단가</p>
-                            <p className="font-semibold mono">{item.pur_pric.toLocaleString()} 원</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500 uppercase">평가 금액</p>
-                            <p className="font-semibold mono">{item.evlt_amt.toLocaleString()} 원</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500 uppercase">현재 가격</p>
-                            <p className="font-semibold mono">{item.cur_prc.toLocaleString()} 원</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500 uppercase">최고 PEAK율 (가)</p>
-                            <p className="font-semibold mono" style={{ color: item.peak_profit_rate >= 0 ? 'var(--color-profit)' : 'var(--color-loss)' }}>
-                              {item.peak_profit_rate}% ({item.peak_price.toLocaleString()}원)
-                            </p>
-                          </div>
+                          <button 
+                            onClick={() => handleInstantSell(item)}
+                            className="btn btn-danger text-[9.5px] py-0.5 px-2.5 rounded-lg font-bold"
+                          >
+                            즉시 매도
+                          </button>
                         </div>
                       </div>
-
-                      {/* Sell button and time details */}
-                      <div className="flex justify-between items-center mt-3 pt-2">
-                        <span className="text-[10px] text-gray-500">진입시간: {item.buy_time}</span>
-                        <button 
-                          onClick={() => handleInstantSell(item)}
-                          className="btn btn-danger text-xs py-1 px-3 border-red-500/30 hover:bg-red-500/10 font-medium"
-                          style={{ borderColor: 'rgba(255, 68, 68, 0.3)', color: 'var(--color-profit)' }}
-                        >
-                          즉시 시장가 매도
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Simulated Manual Order Form (수동 주문 발주) */}
-          <div className="card">
-            <div className="card-title">수동 매도/매수 주문 실행</div>
-            <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-              <div className="md:col-span-1">
-                <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">주문 구분</label>
+          {/* Manual Order card (Compact Inline Form) */}
+          <div className="card" style={{ padding: '14px' }}>
+            <div className="card-title">수동 즉시 주문 실행</div>
+            <form onSubmit={handlePlaceOrder} className="grid grid-cols-5 gap-2 items-end">
+              <div>
+                <label className="block text-[9px] font-bold text-neutral-500 mb-1">구분</label>
                 <select 
                   value={manualOrder.side}
                   onChange={(e) => setManualOrder({ ...manualOrder, side: e.target.value })}
-                  className="input font-medium"
+                  className="input font-semibold p-1"
                 >
                   <option value="buy">매수</option>
                   <option value="sell">매도</option>
                 </select>
               </div>
 
-              <div className="md:col-span-1">
-                <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">종목코드</label>
+              <div>
+                <label className="block text-[9px] font-bold text-neutral-500 mb-1">종목코드</label>
                 <input 
                   type="text"
                   value={manualOrder.stk_cd}
                   onChange={(e) => setManualOrder({ ...manualOrder, stk_cd: e.target.value })}
-                  className="input font-medium mono text-center"
+                  className="input font-bold mono text-center"
                   placeholder="005930"
                 />
               </div>
 
-              <div className="md:col-span-1">
-                <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">수량 (주)</label>
+              <div>
+                <label className="block text-[9px] font-bold text-neutral-500 mb-1">수량</label>
                 <input 
                   type="number"
                   value={manualOrder.quantity}
                   onChange={(e) => setManualOrder({ ...manualOrder, quantity: e.target.value })}
-                  className="input font-medium mono"
-                  placeholder="10"
+                  className="input font-bold mono text-center"
                 />
               </div>
 
-              <div className="md:col-span-1">
-                <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">주문단가 (0: 시장가)</label>
+              <div>
+                <label className="block text-[9px] font-bold text-neutral-500 mb-1">단가(0:시장가)</label>
                 <input 
                   type="number"
                   value={manualOrder.price}
                   onChange={(e) => setManualOrder({ ...manualOrder, price: e.target.value })}
-                  className="input font-medium mono"
-                  placeholder="0"
+                  className="input font-bold mono text-center"
                 />
               </div>
 
-              <div className="md:col-span-1">
-                <button type="submit" className="btn btn-primary w-full py-2.5 font-bold text-xs uppercase tracking-wider">
-                  주문 전송
+              <div>
+                <button type="submit" className="btn btn-primary w-full py-1.5 rounded-xl font-bold text-[10px] uppercase">
+                  주문전송
                 </button>
               </div>
             </form>
@@ -642,122 +564,116 @@ function App() {
 
         </div>
 
-      </div>
-
-      {/* Logs and Histories Row */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-        
-        {/* 2 & 4) 조건검색 실시간 탐지 결과 및 이력 영역 */}
-        <div className="card flex flex-col" style={{ minHeight: '350px' }}>
-          <div className="card-title">
-            <span>실시간 조건 탐지 및 해제 이력</span>
-            <span className="text-xs text-gray-500">최근 감지순</span>
-          </div>
+        {/* ================= COLUMN 3 (Right): Detections & Trades Logs ================= */}
+        <div className="lg:col-span-4 flex flex-col gap-4">
           
-          <div className="overflow-x-auto flex-grow">
-            <table className="w-full text-xs text-left">
-              <thead>
-                <tr className="text-gray-500 border-b border-neutral-800">
-                  <th className="py-2.5">시간</th>
-                  <th className="py-2.5">조건명</th>
-                  <th className="py-2.5">종목</th>
-                  <th className="py-2.5">포착가</th>
-                  <th className="py-2.5 text-right">상태</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detected_history.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" className="text-center py-8 text-neutral-600">
-                      실시간 조건 탐지 이력이 아직 존재하지 않습니다.
-                    </td>
+          {/* 2 & 4) 실시간 조건 탐지 결과 및 이력 (Compact height limit) */}
+          <div className="card flex flex-col" style={{ height: '270px', padding: '14px' }}>
+            <div className="card-title">
+              <span>실시간 조건 탐지 및 해제 이력</span>
+              <span className="badge badge-disconnected text-[9px] font-mono">최근 감지</span>
+            </div>
+            
+            <div className="overflow-y-auto flex-grow">
+              <table className="w-full text-[11px] text-left">
+                <thead>
+                  <tr className="text-neutral-400 border-b border-neutral-100 font-bold">
+                    <th className="py-1">시간</th>
+                    <th className="py-1">조건식</th>
+                    <th className="py-1">종목</th>
+                    <th className="py-1 text-right">상태</th>
                   </tr>
-                ) : (
-                  detected_history.map((log, idx) => (
-                    <tr key={idx} className="border-b border-neutral-900 hover:bg-neutral-900/30">
-                      <td className="py-2.5 text-gray-400 font-mono">{log.time}</td>
-                      <td className="py-2.5 text-gray-300 font-medium">{log.condition_name}</td>
-                      <td className="py-2.5">
-                        <span className="font-semibold text-white">{log.stk_nm}</span>
-                        <span className="text-gray-500 font-mono ml-1 text-[10px]">({log.stk_cd})</span>
-                      </td>
-                      <td className="py-2.5 font-mono">{log.price.toLocaleString()} 원</td>
-                      <td className="py-2.5 text-right font-bold" style={{ color: log.status === '탐지' ? 'var(--color-profit)' : 'var(--color-loss)' }}>
-                        {log.status}
+                </thead>
+                <tbody>
+                  {detected_history.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="text-center py-12 text-neutral-400">
+                        실시간 탐지 이력이 비어있습니다.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* 5) 매수/매도 거래 주문 이력 영역 */}
-        <div className="card flex flex-col" style={{ minHeight: '350px' }}>
-          <div className="card-title">
-            <span>체결 및 거래 집행 이력</span>
-            <span className="text-xs text-gray-500">최근 체결순</span>
-          </div>
-
-          <div className="overflow-x-auto flex-grow">
-            <table className="w-full text-xs text-left">
-              <thead>
-                <tr className="text-gray-500 border-b border-neutral-800">
-                  <th className="py-2.5">시간</th>
-                  <th className="py-2.5">종목</th>
-                  <th className="py-2.5">구분</th>
-                  <th className="py-2.5">수량/단가</th>
-                  <th className="py-2.5">체결금액</th>
-                  <th className="py-2.5">수익률</th>
-                  <th className="py-2.5 text-right">사유</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trade_history.length === 0 ? (
-                  <tr>
-                    <td colSpan="7" className="text-center py-8 text-neutral-600">
-                      체결된 거래 이력이 존재하지 않습니다.
-                    </td>
-                  </tr>
-                ) : (
-                  trade_history.map((trade, idx) => {
-                    const isBuy = trade.side === '매수';
-                    const hasPnl = !isBuy && trade.pnl_rate !== 0;
-                    const pnlColor = trade.pnl_rate >= 0 ? 'var(--color-profit)' : 'var(--color-loss)';
-                    return (
-                      <tr key={idx} className="border-b border-neutral-900 hover:bg-neutral-900/30">
-                        <td className="py-2.5 text-gray-400 font-mono">{trade.time}</td>
-                        <td className="py-2.5">
-                          <span className="font-semibold text-white">{trade.stk_nm}</span>
-                          <span className="text-gray-500 font-mono ml-1 text-[10px]">({trade.stk_cd})</span>
+                  ) : (
+                    detected_history.map((log, idx) => (
+                      <tr key={idx} className="border-b border-neutral-50/50 hover:bg-neutral-50">
+                        <td className="py-1.5 text-neutral-400 mono">{log.time}</td>
+                        <td className="py-1.5 text-neutral-600 font-medium">{log.condition_name.split(' ')[0]}</td>
+                        <td className="py-1.5 font-bold text-neutral-800">
+                          {log.stk_nm} <span className="text-[9px] font-mono text-neutral-400 font-normal">({log.stk_cd})</span>
                         </td>
-                        <td className="py-2.5 font-bold" style={{ color: isBuy ? 'var(--color-profit)' : 'var(--color-loss)' }}>
-                          {trade.side}
+                        <td className="py-1.5 text-right font-extrabold text-[10.5px]" style={{ color: log.status === '탐지' ? 'var(--color-profit)' : 'var(--color-loss)' }}>
+                          {log.status}
                         </td>
-                        <td className="py-2.5 font-mono">
-                          {trade.qty}주 / {trade.price.toLocaleString()}원
-                        </td>
-                        <td className="py-2.5 font-mono">{(trade.price * trade.qty).toLocaleString()} 원</td>
-                        <td className="py-2.5 font-semibold font-mono" style={{ color: pnlColor }}>
-                          {isBuy ? '-' : `${trade.pnl_rate >= 0 ? '+' : ''}${trade.pnl_rate}%`}
-                        </td>
-                        <td className="py-2.5 text-right text-gray-400 text-[10px] font-medium">{trade.reason || '수동 주문'}</td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {/* 5) 매수/매도 거래 주문 이력 (Compact height limit) */}
+          <div className="card flex flex-col" style={{ height: '270px', padding: '14px' }}>
+            <div className="card-title">
+              <span>체결 및 주문 집행 이력</span>
+              <span className="badge badge-disconnected text-[9px] font-mono">최근 체결</span>
+            </div>
+
+            <div className="overflow-y-auto flex-grow">
+              <table className="w-full text-[11px] text-left">
+                <thead>
+                  <tr className="text-neutral-400 border-b border-neutral-100 font-bold">
+                    <th className="py-1">시간</th>
+                    <th className="py-1">종목</th>
+                    <th className="py-1">구분</th>
+                    <th className="py-1">수량/단가</th>
+                    <th className="py-1">수익률</th>
+                    <th className="py-1 text-right">사유</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trade_history.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="text-center py-12 text-neutral-400">
+                        체결된 거래 내역이 비어있습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    trade_history.map((trade, idx) => {
+                      const isBuy = trade.side === '매수';
+                      const hasPnl = !isBuy && trade.pnl_rate !== 0;
+                      const pnlColor = trade.pnl_rate >= 0 ? 'var(--color-profit)' : 'var(--color-loss)';
+                      return (
+                        <tr key={idx} className="border-b border-neutral-50/50 hover:bg-neutral-50">
+                          <td className="py-1.5 text-neutral-400 mono">{trade.time}</td>
+                          <td className="py-1.5 font-bold text-neutral-800">
+                            {trade.stk_nm}
+                          </td>
+                          <td className="py-1.5 font-extrabold" style={{ color: isBuy ? 'var(--color-profit)' : 'var(--color-loss)' }}>
+                            {trade.side}
+                          </td>
+                          <td className="py-1.5 font-mono text-[10px] text-neutral-500">
+                            {trade.qty}주/{trade.price.toLocaleString()}원
+                          </td>
+                          <td className="py-1.5 font-bold font-mono" style={{ color: pnlColor }}>
+                            {isBuy ? '-' : `${trade.pnl_rate >= 0 ? '+' : ''}${trade.pnl_rate}%`}
+                          </td>
+                          <td className="py-1.5 text-right text-neutral-400 text-[9px] font-semibold">{trade.reason ? trade.reason.split(' ')[0] : '수동'}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
         </div>
 
-      </section>
+      </div>
 
       {/* Footer */}
-      <footer className="mt-12 mb-4 text-center border-t border-neutral-900 pt-6 text-[10px] text-gray-600">
-        <p>© 2026 AutoStock Algorithmic Trading Desk. All rights reserved.</p>
-        <p className="mt-1">보안 수칙: 계좌 비밀번호 및 앱 키 시크릿은 로컬 PC 설정 디렉토리 내에 독립된 파일로만 격리되어 로드됩니다.</p>
+      <footer className="text-center border-t border-neutral-200/60 pt-3 text-[9px] text-neutral-400 flex justify-between items-center">
+        <span>© 2026 AutoStock Algorithmic Trading Desk</span>
+        <span>보안 안내: 모든 비밀번호 및 앱 키 인증 정보는 소스코드 격리 상태로 로컬 물리 파일시스템에서만 관리됩니다.</span>
       </footer>
 
     </div>

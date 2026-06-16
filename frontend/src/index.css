@@ -1,21 +1,21 @@
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap');
 
 :root {
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #141414;
-  --bg-tertiary: #1e1e1e;
-  --border-color: #2a2a2a;
-  --text-primary: #ffffff;
-  --text-secondary: #888888;
-  --text-muted: #555555;
-  --accent-white: #ffffff;
+  --bg-primary: #f6f8fa;       /* Soft light-gray background */
+  --bg-secondary: #ffffff;     /* Pure white for cards */
+  --bg-tertiary: #f1f3f5;      /* Clean background for inputs/buttons */
+  --border-color: #eef1f6;     /* Subtle light borders */
+  --text-primary: #1a1f26;     /* Soft black for readability */
+  --text-secondary: #4a5568;   /* Slate gray for labels/secondary text */
+  --text-muted: #a0aec0;       /* Light gray for muted text */
+  --accent-color: #000000;     /* High contrast black */
   
-  /* Red for profit, Blue for loss - per user requirement */
-  --color-profit: #ff4444; 
-  --color-loss: #3388ff;
+  /* Red for profit, Blue for loss */
+  --color-profit: #e53e3e;     /* Red/Coral profit indicator */
+  --color-loss: #3182ce;       /* Sky blue loss indicator */
   
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.25s ease;
+  --transition-fast: 0.12s ease;
+  --transition-normal: 0.22s ease;
 }
 
 * {
@@ -27,7 +27,7 @@
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
@@ -37,69 +37,50 @@ code, pre, .mono {
   font-family: 'Fira Code', 'Courier New', Courier, monospace;
 }
 
-/* Custom Scrollbars */
+/* Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
+  background: #cbd5e0;
+  border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: #a0aec0;
 }
 
-/* Animations */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes pulse {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.05); opacity: 0.8; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.pulse-red {
-  animation: pulse 2s infinite ease-in-out;
-}
-
-/* Common Layout Utilities */
+/* Soft rounded cards with pillow shadows */
 .card {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 20px;
-  transition: border-color var(--transition-normal);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02), 0 1px 3px rgba(0, 0, 0, 0.01);
+  transition: all var(--transition-normal);
 }
 .card:hover {
-  border-color: #444444;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.04), 0 2px 6px rgba(0, 0, 0, 0.02);
 }
 
 .card-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
-  border-left: 2px solid var(--accent-white);
-  padding-left: 10px;
-  margin-bottom: 15px;
+  border-left: 3px solid var(--accent-color);
+  padding-left: 8px;
+  margin-bottom: 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-/* Interactive elements */
+/* Compact Forms and Inputs */
 button, input, select {
   font-family: inherit;
 }
@@ -108,88 +89,92 @@ button, input, select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  font-weight: 500;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
   cursor: pointer;
+  border: none;
   transition: all var(--transition-fast);
 }
 
 .btn-primary {
-  background-color: var(--accent-white);
-  color: var(--bg-primary);
-  border: 1px solid var(--accent-white);
+  background-color: var(--accent-color);
+  color: #ffffff;
+  border: 1px solid var(--accent-color);
 }
 .btn-primary:hover {
-  background-color: #dddddd;
-  border-color: #dddddd;
+  background-color: #222222;
+  transform: translateY(-1px);
 }
 .btn-primary:active {
   transform: scale(0.98);
 }
 
 .btn-secondary {
-  background-color: transparent;
+  background-color: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.01);
 }
 .btn-secondary:hover {
   background-color: var(--bg-tertiary);
-  border-color: #555555;
+  border-color: #cbd5e0;
 }
 
 .btn-danger {
-  background-color: transparent;
+  background-color: rgba(229, 62, 62, 0.08);
   color: var(--color-profit);
-  border: 1px solid var(--color-profit);
+  border: 1px solid rgba(229, 62, 62, 0.2);
 }
 .btn-danger:hover {
-  background-color: rgba(255, 68, 68, 0.1);
+  background-color: rgba(229, 62, 62, 0.15);
+  transform: translateY(-1px);
 }
 
 .btn-success {
-  background-color: transparent;
+  background-color: rgba(49, 130, 206, 0.08);
   color: var(--color-loss);
-  border: 1px solid var(--color-loss);
+  border: 1px solid rgba(49, 130, 206, 0.2);
 }
 .btn-success:hover {
-  background-color: rgba(51, 136, 255, 0.1);
+  background-color: rgba(49, 130, 206, 0.15);
 }
 
 .input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 7px 12px;
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 10px;
   color: var(--text-primary);
-  font-size: 0.9rem;
-  transition: border-color var(--transition-fast);
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all var(--transition-fast);
 }
 .input:focus {
-  border-color: var(--text-secondary);
+  background-color: var(--bg-secondary);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.04);
   outline: none;
 }
 
+/* Badges */
 .badge {
   display: inline-block;
-  padding: 2px 6px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border-radius: 3px;
-  text-transform: uppercase;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 8px;
 }
 
 .badge-connected {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  border: 1px solid var(--text-secondary);
+  background-color: rgba(49, 130, 206, 0.1);
+  color: var(--color-loss);
 }
 
 .badge-disconnected {
-  background-color: rgba(255, 255, 255, 0.05);
-  color: var(--text-muted);
-  border: 1px solid var(--border-color);
+  background-color: #edf2f7;
+  color: #718096;
 }
