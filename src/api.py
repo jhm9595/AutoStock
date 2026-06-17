@@ -41,7 +41,7 @@ class KiwoomRateLimiter:
                             sleep_needed = wait_time
                 
                 if sleep_needed > 0:
-                    limiter_logger.warning(
+                    limiter_logger.debug(
                         f"Rate limit reached. Sleeping for {sleep_needed:.3f} seconds "
                         f"to comply with Kiwoom API limits (5/s, 100/m, 1000/h)."
                     )
@@ -64,6 +64,12 @@ def parse_numeric(val):
         return int(val_str)
     except ValueError:
         return val_str
+
+class KiwoomAPIError(Exception):
+    def __init__(self, return_code, return_msg):
+        self.return_code = return_code
+        self.return_msg = return_msg
+        super().__init__(f"Kiwoom API Error {return_code}: {return_msg}")
 
 class KiwoomClient:
     def __init__(self, token_manager):
@@ -104,6 +110,7 @@ class KiwoomClient:
             
             if return_code is not None and return_code != 0:
                 logger.error(f"[{api_id}] API returned error {return_code}: {return_msg}")
+                raise KiwoomAPIError(return_code, return_msg)
             
             # Return response and headers (for pagination info)
             return res_data, response.headers
@@ -320,47 +327,3 @@ class KiwoomClient:
             "return_code": res_data.get("return_code"),
             "return_msg": res_data.get("return_msg", "")
         }
-
-    # 10. 조건식 목록조회 (ka10171)
-    def get_condition_list(self):
-        """Retrieves user's registered condition search list from Kiwoom."""
-        body = {
-            "trnm": "CNSRLST"
-        }
-        res_data, _ = self._post("ka10171", "/api/dostk/websocket", body)
-        raw_list = res_data.get("data", [])
-        conditions = []
-        for item in raw_list:
-            if isinstance(item, list) and len(item) >= 2:
-                conditions.append({
-                    "id": str(item[0]),
-                    "name": str(item[1])
-                })
-            elif isinstance(item, dict):
-                conditions.append({
-                    "id": str(item.get("seq", "")),
-                    "name": str(item.get("name", ""))
-                })
-        return conditions
-
-    # 11. 조건검색 요청 실시간 (ka10173)
-    def request_condition_realtime(self, seq):
-        """Requests real-time tracking for a specific condition formula."""
-        body = {
-            "trnm": "CNSRREQ",
-            "seq": str(seq),
-            "search_type": "1",
-            "stex_tp": "K"
-        }
-        res_data, _ = self._post("ka10173", "/api/dostk/websocket", body)
-        return res_data
-
-    # 12. 조건검색 실시간 해제 (ka10174)
-    def cancel_condition_realtime(self, seq):
-        """Cancels real-time tracking for a specific condition formula."""
-        body = {
-            "trnm": "CNSRCLR",
-            "seq": str(seq)
-        }
-        res_data, _ = self._post("ka10174", "/api/dostk/websocket", body)
-        return res_data

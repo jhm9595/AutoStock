@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from src import config
 from src.auth import TokenManager
-from src.api import KiwoomClient, parse_numeric
+from src.api import KiwoomClient, parse_numeric, KiwoomAPIError
 from src.websocket import KiwoomWebSocket
 
 logger = logging.getLogger("AutoStock.App")
@@ -54,7 +54,9 @@ state = {
     "active_conditions": [],  # Connected condition IDs
     "detected_history": [],
     "trade_history": [],
-    "holdings": []
+    "holdings": [],
+    "daily_bought_stocks": [],  # 하루 1번 매수 제한을 위한 당일 매수 종목 리스트
+    "last_trading_date": ""
 }
 
 def load_state():
@@ -64,7 +66,7 @@ def load_state():
             with open(STATE_FILE, 'r', encoding='utf-8') as f:
                 loaded = json.load(f)
                 # Merge loaded keys to preserve structure
-                for key in ["general_info", "settings", "active_conditions", "detected_history", "trade_history", "holdings"]:
+                for key in ["general_info", "settings", "active_conditions", "detected_history", "trade_history", "holdings", "daily_bought_stocks", "last_trading_date"]:
                     if key in loaded:
                         if isinstance(state[key], dict):
                             state[key].update(loaded[key])
@@ -89,7 +91,7 @@ state["general_info"]["login_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S
 days_kr = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
 state["general_info"]["day_of_week"] = days_kr[datetime.now().weekday()]
 
-# Connect to Kiwoom API if not in simulation mode
+# Connect to Kiwoom API
 token_mgr = TokenManager()
 kiwoom_client = KiwoomClient(token_mgr)
 
@@ -116,9 +118,7 @@ def ws_message_handler(data):
                             
                     status_str = "탐지" if action_type == "I" else "해제"
                     
-                    stk_nm = SIMULATED_STOCKS.get(stk_cd, {}).get("name", "")
-                    if not stk_nm:
-                        stk_nm = f"종목 {stk_cd}"
+                    stk_nm = f"종목 {stk_cd}"
                         
                     duplicate = any(d for d in state["detected_history"][:5] 
                                     if d["stk_cd"] == stk_cd and d["condition_name"] == cond_name and d["status"] == status_str)
@@ -135,24 +135,41 @@ def ws_message_handler(data):
                         logger.info(f"[실시간 조건] {status_str}: {cond_name} -> {stk_nm}({stk_cd}) @ {time_str}")
                         
                         if action_type == "I" and state["settings"]["auto_buy"]:
-                            asyncio.create_task(execute_auto_buy(stk_cd, cond_name))
+                            # FID 10 = 현재가 (REAL 패킷에 이미 포함됨 - REST 조회 불필요)
+                            realtime_price = abs(parse_numeric(vals.get("10", 0)))
+                            asyncio.create_task(execute_auto_buy(stk_cd, cond_name, realtime_price))
                             
                         save_state()
                         
     except Exception as e:
         logger.error(f"Error handling WS message: {e}")
 
-async def execute_auto_buy(stk_cd, cond_name):
+async def execute_auto_buy(stk_cd, cond_name, realtime_price=0):
     try:
         logger.info(f"[자동 매수] 조건 탐지 자동 매수 개시: {stk_cd} ({cond_name})")
+        
+        # 1. 당일 이미 매수한 종목인지 확인
+        if stk_cd in state.get("daily_bought_stocks", []):
+            logger.info(f"[자동 매수] {stk_cd} 종목은 금일 이미 매수 이력이 있어 자동 매수를 건너뜁니다.")
+            return
+            
+        # 2. 현재 보유 중인지 확인
         holding_exist = any(h for h in state["holdings"] if h["stk_cd"] == stk_cd)
         if holding_exist:
             logger.info(f"[자동 매수] {stk_cd} 종목은 이미 보유 중이므로 자동 매수를 건너뜁니다.")
             return
 
         loop = asyncio.get_running_loop()
-        stk_info = await loop.run_in_executor(None, kiwoom_client.get_stock_info, stk_cd)
-        price = abs(parse_numeric(stk_info.get("cur_prc", 0)))
+
+        if realtime_price > 0:
+            # 빠르게 매수: REAL 패킷의 현재가 직접 활용 (REST 호출 없음)
+            price = realtime_price
+            logger.info(f"[자동 매수] 실시간 패킷 현재가 사용: {price:,}원 (REST 조회 생략)")
+        else:
+            # Fallback: REST API로 현재가 조회
+            logger.info(f"[자동 매수] REAL 패킷에 현재가 없음 - REST 호출로 fallback")
+            stk_info = await loop.run_in_executor(None, kiwoom_client.get_stock_info, stk_cd)
+            price = abs(parse_numeric(stk_info.get("cur_prc", 0)))
         
         if price == 0:
             logger.error(f"[자동 매수] {stk_cd} 현재가를 가져오지 못했습니다. 자동 매수 취소.")
@@ -172,8 +189,30 @@ async def execute_auto_buy(stk_cd, cond_name):
         res = await loop.run_in_executor(None, kiwoom_client.place_order, stk_cd, qty, 0, "3", "buy")
         
         if res.get("return_code") == 0:
-            logger.info(f"[자동 매수] 주문 성공! 주문번호: {res.get('ord_no')} | {res.get('return_msg')}")
+            ord_no = res.get('ord_no', '-')
+            logger.info(f"[자동 매수] 주문 성공! 주문번호: {ord_no} | {res.get('return_msg')}")
+            state["trade_history"].insert(0, {
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "stk_cd": stk_cd,
+                "stk_nm": stk_cd,
+                "side": "매수",
+                "qty": qty,
+                "price": price,
+                "amt": price * qty,
+                "pnl_rate": 0.0,
+                "reason": f"자동 매수 ({cond_name})"
+            })
+            
+            # 당일 매수 리스트에 추가
+            if "daily_bought_stocks" not in state:
+                state["daily_bought_stocks"] = []
+            state["daily_bought_stocks"].append(stk_cd)
+            
+            save_state()
+            # 주문 접수 후 키움 서버 처리 대기 후 잔액 갱신
+            await asyncio.sleep(1.5)
             await loop.run_in_executor(None, update_kiwoom_connection)
+            logger.info(f"[자동 매수] 잔액 갱신 완료 - 가용금액: {state['general_info']['available_funds']:,}원")
         else:
             logger.error(f"[자동 매수] 주문 실패: {res.get('return_msg')}")
             
@@ -182,9 +221,17 @@ async def execute_auto_buy(stk_cd, cond_name):
 
 def update_kiwoom_connection():
     try:
-        accounts = kiwoom_client.get_account_numbers()
-        if accounts:
-            state["general_info"]["account_no"] = accounts[0]
+        account_no = state["general_info"]["account_no"]
+        if not account_no:
+            accounts = kiwoom_client.get_account_numbers()
+            if accounts:
+                account_no = accounts[0]
+                state["general_info"]["account_no"] = account_no
+            else:
+                state["general_info"]["is_connected"] = False
+                return
+
+        if account_no:
             state["general_info"]["is_connected"] = True
             
             # Fetch actual deposit (Available funds)
@@ -230,14 +277,7 @@ def update_kiwoom_connection():
             except Exception as e:
                 logger.warning(f"Failed to fetch live balance: {e}")
 
-            # Fetch actual condition search list
-            try:
-                conds = kiwoom_client.get_condition_list()
-                if conds:
-                    state["condition_search_list"] = conds
-                    logger.info(f"Loaded actual condition list: {conds}")
-            except Exception as e:
-                logger.warning(f"Failed to fetch live condition list: {e}")
+
         else:
             state["general_info"]["is_connected"] = False
     except Exception as e:
@@ -283,43 +323,52 @@ def update_settings(updates: SettingsUpdate):
     return {"status": "success", "settings": state["settings"]}
 
 @app.post("/api/conditions/toggle")
-def toggle_condition(toggle: ConditionToggle):
+async def toggle_condition(toggle: ConditionToggle):
     c_id = toggle.condition_id
+    if not kiwoom_ws or not kiwoom_ws.is_connected:
+        raise HTTPException(status_code=400, detail="실시간 시세 서버(WebSocket)가 연결되어 있지 않습니다. 잠시 후 다시 시도해 주세요.")
+        
+    # 조건식 이름 조회 (로그 가독성)  
+    cond_name = next((c["name"] for c in state.get("condition_search_list", []) if c["id"] == c_id), c_id)
+
     if c_id in state["active_conditions"]:
-        state["active_conditions"].remove(c_id)
-        action = "disconnected"
         try:
-            kiwoom_client.cancel_condition_realtime(c_id)
-            logger.info(f"Kiwoom real-time condition unregistered: {c_id}")
+            await kiwoom_ws.cancel_condition_realtime(c_id)
+            state["active_conditions"].remove(c_id)
+            action = "disconnected"
+            logger.info(f"조건검색 실시간 해제: [{c_id}] {cond_name}")
         except Exception as e:
             logger.error(f"Failed to unregister condition {c_id} on Kiwoom: {e}")
+            raise HTTPException(status_code=400, detail=f"조건 연동 해제 실패: {str(e)}")
     else:
-        state["active_conditions"].append(c_id)
-        action = "connected"
         try:
-            kiwoom_client.request_condition_realtime(c_id)
-            logger.info(f"Kiwoom real-time condition registered: {c_id}")
+            await kiwoom_ws.request_condition_realtime(c_id)
+            state["active_conditions"].append(c_id)
+            action = "connected"
+            logger.info(f"조건검색 실시간 등록: [{c_id}] {cond_name}")
         except Exception as e:
             logger.error(f"Failed to register condition {c_id} on Kiwoom: {e}")
+            raise HTTPException(status_code=400, detail=f"조건 연동 실패: {str(e)}")
     save_state()
     return {"status": "success", "active_conditions": state["active_conditions"], "action": action}
 
+
 @app.post("/api/conditions/refresh")
-def refresh_conditions():
+async def refresh_conditions():
     if not state["general_info"]["is_connected"]:
         raise HTTPException(status_code=400, detail="키움 API가 연결되어 있지 않습니다.")
+    if not kiwoom_ws or not kiwoom_ws.is_connected:
+        raise HTTPException(status_code=400, detail="실시간 시세 서버(WebSocket)가 연결되어 있지 않습니다. 잠시 후 다시 시도해 주세요.")
     try:
-        conds = kiwoom_client.get_condition_list()
-        if conds:
-            state["condition_search_list"] = conds
-            save_state()
-            logger.info(f"Manually refreshed condition list: {conds}")
-            return {"status": "success", "conditions": conds}
-        else:
-            return {"status": "success", "message": "등록된 조건식이 없습니다."}
+        conds = await kiwoom_ws.get_condition_list()
+        state["condition_search_list"] = conds
+        save_state()
+        logger.info(f"Manually refreshed condition list: {conds}")
+        return {"status": "success", "conditions": conds}
     except Exception as e:
         logger.error(f"Failed to refresh condition list: {e}")
-        raise HTTPException(status_code=500, detail=f"조건식 동기화 실패: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"조건식 동기화 실패: {str(e)}")
+
 
 @app.post("/api/order")
 async def place_order(order: ManualOrder):
@@ -330,7 +379,7 @@ async def place_order(order: ManualOrder):
     trade_type = order.trade_type
     
     if not state["general_info"]["is_connected"]:
-        raise HTTPException(status_code=400, detail="Kiwoom API is disconnected.")
+        raise HTTPException(status_code=400, detail="키움 API가 연결되어 있지 않습니다.")
     try:
         stk_nm = f"종목 {stk_cd}"
         existing = next((h for h in state["holdings"] if h["stk_cd"] == stk_cd), None)
@@ -338,23 +387,23 @@ async def place_order(order: ManualOrder):
             stk_nm = existing["stk_nm"]
 
         res = kiwoom_client.place_order(stk_cd, qty, price, trade_type, side)
-        if res.get("return_code") == 0:
-            state["trade_history"].insert(0, {
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "stk_cd": stk_cd,
-                "stk_nm": stk_nm,
-                "side": "매수" if side == "buy" else "매도",
-                "qty": qty,
-                "price": price if price > 0 else 0,
-                "amt": price * qty if price > 0 else 0,
-                "pnl_rate": 0.0,
-                "reason": "수동 주문"
-            })
-            update_kiwoom_connection()
-            save_state()
-            return {"status": "success", "order_no": res.get("ord_no"), "message": res.get("return_msg")}
-        else:
-            raise HTTPException(status_code=400, detail=res.get("return_msg"))
+        state["trade_history"].insert(0, {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "stk_cd": stk_cd,
+            "stk_nm": stk_nm,
+            "side": "매수" if side == "buy" else "매도",
+            "qty": qty,
+            "price": price if price > 0 else 0,
+            "amt": price * qty if price > 0 else 0,
+            "pnl_rate": 0.0,
+            "reason": "수동 주문"
+        })
+        update_kiwoom_connection()
+        save_state()
+        return {"status": "success", "order_no": res.get("ord_no"), "message": res.get("return_msg")}
+    except KiwoomAPIError as e:
+        logger.error(f"Kiwoom order API error: {e.return_msg}")
+        raise HTTPException(status_code=400, detail=f"주문 실패: {e.return_msg}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -362,7 +411,11 @@ async def websocket_loop():
     global kiwoom_ws
     logger.info("Starting WebSocket background connection monitor.")
     while True:
-        await asyncio.sleep(5)
+        # 웹소켓은 로그인/인증이 되어 있을 때 항상 연결을 시도하고 유지합니다.
+        if not state["general_info"]["is_connected"]:
+            await asyncio.sleep(3)
+            continue
+
         if kiwoom_ws is None:
             kiwoom_ws = KiwoomWebSocket(token_mgr, ws_message_handler)
         
@@ -370,22 +423,50 @@ async def websocket_loop():
             try:
                 logger.info("Attempting to connect Kiwoom WebSocket...")
                 await kiwoom_ws.connect()
+                
+                # 첫 연결 성공 시 조건식 목록 자동 동기화
+                try:
+                    conds = await kiwoom_ws.get_condition_list()
+                    state["condition_search_list"] = conds
+                    logger.info(f"WebSocket connected. Auto-synced conditions: {conds}")
+                    save_state()
+                except Exception as ex:
+                    logger.warning(f"Failed to auto-sync conditions on WS connection: {ex}")
+
+                # 기존 연동된 조건식들 재등록
                 for cond_id in state["active_conditions"]:
                     logger.info(f"Re-subscribing condition {cond_id} on reconnect...")
-                    await asyncio.get_running_loop().run_in_executor(None, kiwoom_client.request_condition_realtime, cond_id)
+                    try:
+                        await kiwoom_ws.request_condition_realtime(cond_id)
+                    except Exception as ex:
+                        logger.error(f"Failed to re-subscribe condition {cond_id}: {ex}")
             except Exception as e:
                 logger.error(f"WebSocket reconnection failed: {e}")
+                
+        await asyncio.sleep(5)
+
 
 async def real_trading_loop():
-    logger.info("Started real trading background monitor loop.")
+    logger.info("Started real trading background monitor 실거래 감시 루프 시작.")
     while True:
-        await asyncio.sleep(3) # Check every 3 seconds
+        # 보유 주식이 있으면 3초마다 타이트하게 감시(빠른 손절/익절), 없으면 10초 대기(서버 부하 최소화)
+        sleep_time = 3 if len(state.get("holdings", [])) > 0 else 10
+        await asyncio.sleep(sleep_time)
+        
         if not state["general_info"]["is_connected"]:
             continue
             
         now_time = datetime.now()
         current_time_str = now_time.strftime("%H:%M:%S")
         current_hm = datetime.strptime(now_time.strftime("%H:%M"), "%H:%M")
+        current_date_str = now_time.strftime("%Y-%m-%d")
+        
+        # 날짜가 바뀌었으면 당일 매수 리스트 초기화
+        if state.get("last_trading_date") != current_date_str:
+            state["daily_bought_stocks"] = []
+            state["last_trading_date"] = current_date_str
+            save_state()
+            logger.info(f"[실거래 감시] 날짜가 변경되어 당일 매수 기록을 초기화했습니다: {current_date_str}")
         
         # Parse time limits
         try:
@@ -396,9 +477,11 @@ async def real_trading_loop():
             is_sell_time_past = False
             
         # 1. Periodically refresh holdings to get actual cur_prc and prft_rt
+        # 보유 종목이 있을 때만 계좌 잔고를 조회하도록 최적화 (불필요한 REST API 호출 방지)
         try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, update_kiwoom_connection)
+            if len(state["holdings"]) > 0:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, update_kiwoom_connection)
         except Exception as e:
             logger.warning(f"[실거래 감시] 계좌 정보 갱신 실패: {e}")
             continue
@@ -453,7 +536,8 @@ async def real_trading_loop():
                 res = await loop.run_in_executor(None, kiwoom_client.place_order, stk_cd, qty, 0, "3", "sell")
                 
                 if res.get("return_code") == 0:
-                    logger.info(f"[실거래 감시] 자동 매도 주문 성공: {stk_nm}({stk_cd}) - {res.get('return_msg')}")
+                    ord_no = res.get('ord_no', '-')
+                    logger.info(f"[실거래 감시] 자동 매도 주문 성공: {stk_nm}({stk_cd}) 주문번호: {ord_no} - {res.get('return_msg')}")
                     state["trade_history"].insert(0, {
                         "time": current_time_str,
                         "stk_cd": stk_cd,
@@ -465,7 +549,10 @@ async def real_trading_loop():
                         "pnl_rate": pnl_rate,
                         "reason": f"자동 매도 ({reason})"
                     })
+                    # 주문 접수 후 키움 서버 처리 대기 후 잔액 갱신
+                    await asyncio.sleep(1.5)
                     await loop.run_in_executor(None, update_kiwoom_connection)
+                    logger.info(f"[실거래 감시] 잔액 갱신 완료 - 가용금액: {state['general_info']['available_funds']:,}원")
                 else:
                     logger.error(f"[실거래 감시] 자동 매도 주문 실패: {res.get('return_msg')}")
             except Exception as e:
@@ -476,5 +563,7 @@ async def real_trading_loop():
 # Start background monitoring tasks when FastAPI starts
 @app.on_event("startup")
 async def startup_event():
+    # 백그라운드 태스크 시작 (조건식 목록 동기화는 websocket_loop가 첫 연결 성공 시 수행함)
     asyncio.create_task(websocket_loop())
     asyncio.create_task(real_trading_loop())
+

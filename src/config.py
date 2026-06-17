@@ -2,17 +2,28 @@ import os
 import glob
 import logging
 
-# Set up logging format
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger("AutoStock.Config")
-
 # Base Directory Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_DIR = os.path.join(BASE_DIR, 'config')
+
+# Create logs directory if not exists
+LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+if not os.path.exists(LOGS_DIR):
+    os.makedirs(LOGS_DIR)
+
+LOG_FILE_PATH = os.path.join(LOGS_DIR, 'trading.log')
+
+# Set up logging format to console and local file
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE_PATH, encoding='utf-8')
+    ]
+)
+logger = logging.getLogger("AutoStock.Config")
 
 APP_KEY = ""
 SECRET_KEY = ""

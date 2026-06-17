@@ -20,6 +20,7 @@ function App() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const hasInitializedForm = React.useRef(false);
   
   // Settings Form State
   const [settingsForm, setSettingsForm] = useState({
@@ -51,7 +52,15 @@ function App() {
       const data = await response.json();
       setState(data);
       if (data.settings) {
-        setSettingsForm(data.settings);
+        if (!hasInitializedForm.current) {
+          setSettingsForm(data.settings);
+          hasInitializedForm.current = true;
+        } else {
+          setSettingsForm(prev => ({
+            ...prev,
+            auto_buy: data.settings.auto_buy
+          }));
+        }
       }
       setError(null);
     } catch (err) {
@@ -105,19 +114,6 @@ function App() {
     }
   };
 
-  // Toggle Simulation/Live Mode
-  const handleToggleMode = async (mode) => {
-    try {
-      await fetch(`${BACKEND_URL}/api/simulation/toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ simulation_mode: mode })
-      });
-      fetchState();
-    } catch (err) {
-      alert(`모드 전환 실패: ${err.message}`);
-    }
-  };
 
   // Refresh Registered Conditions from Kiwoom
   const handleRefreshConditions = async () => {
@@ -135,16 +131,6 @@ function App() {
     }
   };
 
-  // Reset Simulation
-  const handleResetSimulation = async () => {
-    if (!window.confirm("시뮬레이션 데이터(잔고 및 매매이력)를 초기화하시겠습니까?")) return;
-    try {
-      await fetch(`${BACKEND_URL}/api/simulation/reset`, { method: 'POST' });
-      fetchState();
-    } catch (err) {
-      alert(`초기화 실패: ${err.message}`);
-    }
-  };
 
   // Place Order Handler
   const handlePlaceOrder = async (e) => {
@@ -213,7 +199,7 @@ function App() {
     );
   }
 
-  const { general_info, settings, condition_search_list, active_conditions, detected_history, trade_history, holdings, simulation_mode } = state;
+  const { general_info, settings, condition_search_list, active_conditions, detected_history, trade_history, holdings } = state;
 
   return (
     <div className="flex flex-col" style={{ padding: '15px 24px', minHeight: '100vh', maxWidth: '1800px', margin: '0 auto', gap: '16px' }}>
@@ -282,7 +268,7 @@ function App() {
               <div className="flex items-center gap-1.5">
                 <span>조건 탐지 실시간 연동</span>
                 <span className="badge badge-connected text-[10px] font-mono" style={{ backgroundColor: '#f1f5f9', color: '#475569' }}>
-                  {active_conditions.length}개 연동
+                  {active_conditions.filter(id => condition_search_list.some(c => c.id === id)).length}개 연동
                 </span>
               </div>
               <button 
@@ -296,27 +282,38 @@ function App() {
             </div>
             
             <div className="flex flex-col gap-2.5">
-              {condition_search_list.map((cond) => {
-                const isActive = active_conditions.includes(cond.id);
-                return (
-                  <div 
-                    key={cond.id}
-                    className="flex justify-between items-center py-1.5 px-1 border-b border-neutral-100/50 text-xs"
-                    style={{ borderBottom: '1px solid #f8fafc' }}
-                  >
-                    <span className="font-semibold text-neutral-700">{cond.name}</span>
-                    
-                    <label className="switch">
-                      <input 
-                        type="checkbox" 
-                        checked={isActive} 
-                        onChange={() => handleToggleCondition(cond.id)}
-                      />
-                      <span className="switch-slider"></span>
-                    </label>
-                  </div>
-                );
-              })}
+              {condition_search_list.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-5 bg-neutral-50/50 border border-dashed border-neutral-200/60 rounded-2xl">
+                  <p className="text-[11px] font-bold text-neutral-600 mb-1">동기화된 조건식이 없습니다.</p>
+                  <p className="text-[9.5px] text-neutral-400 text-center leading-relaxed">
+                    우측 상단의 <strong>[조건식 동기화]</strong> 버튼을 누르거나,<br/>
+                    키움 HTS <strong>[0150] 조건검색</strong> 메뉴에서<br/>
+                    조건식 작성 후 <strong>[내조건식 저장]</strong>을 해보세요.
+                  </p>
+                </div>
+              ) : (
+                condition_search_list.map((cond) => {
+                  const isActive = active_conditions.includes(cond.id);
+                  return (
+                    <div 
+                      key={cond.id}
+                      className="flex justify-between items-center py-1.5 px-1 border-b border-neutral-100/50 text-xs"
+                      style={{ borderBottom: '1px solid #f8fafc' }}
+                    >
+                      <span className="font-semibold text-neutral-700">{cond.name}</span>
+                      
+                      <label className="switch">
+                        <input 
+                          type="checkbox" 
+                          checked={isActive} 
+                          onChange={() => handleToggleCondition(cond.id)}
+                        />
+                        <span className="switch-slider"></span>
+                      </label>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -334,7 +331,32 @@ function App() {
                   <input 
                     type="checkbox"
                     checked={settingsForm.auto_buy}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, auto_buy: e.target.checked })}
+                    onChange={async (e) => {
+                      const newAutoBuy = e.target.checked;
+                      setSettingsForm(prev => ({ ...prev, auto_buy: newAutoBuy }));
+                      try {
+                        const updated = {
+                          ...settingsForm,
+                          buy_budget_per_stock: Number(settingsForm.buy_budget_per_stock),
+                          daily_budget_limit: Number(settingsForm.daily_budget_limit),
+                          trailing_stop_pct: Number(settingsForm.trailing_stop_pct),
+                          stop_loss_pct: Number(settingsForm.stop_loss_pct),
+                          auto_buy: newAutoBuy
+                        };
+                        const response = await fetch(`${BACKEND_URL}/api/settings`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(updated)
+                        });
+                        const data = await response.json();
+                        if (data.status === 'success') {
+                          setState(prev => ({ ...prev, settings: data.settings }));
+                        }
+                      } catch (err) {
+                        alert(`봇 상태 변경 실패: ${err.message}`);
+                        setSettingsForm(prev => ({ ...prev, auto_buy: !newAutoBuy }));
+                      }
+                    }}
                   />
                   <span className="switch-slider"></span>
                 </label>

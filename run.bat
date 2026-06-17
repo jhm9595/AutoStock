@@ -19,4 +19,9 @@ echo ==========================================================
 echo  AutoStock started successfully.
 echo  Access: http://localhost:5173/
 echo ==========================================================
+
+:: Wait a few seconds for servers to start, then open browser
+ping 127.0.0.1 -n 4 > nul
+start "" "http://localhost:5173/"
+
 exit
